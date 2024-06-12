@@ -15,6 +15,8 @@ library(shinycssloaders)
 library(openxlsx)
 library(DT)
 
+library(DBI) #connecting to sql database
+
 
 #this line alligns your working directory with the file path but can't be used for an application hosted on shinyapps
 #setwd(dirname(rstudioapi::getSourceEditorContext()$path))
@@ -30,41 +32,20 @@ ui <- dashboardPage(
                                 menuItem(" Space Heating Battery", tabName = "SHB", icon = icon("house-fire")),
                                 menuItem(" Heat Load", tabName = "Heat_Load", icon = icon("gauge")),
                                 menuItem(" Operation Mode", tabName = "OP_MO", icon = icon("table-list")),
-                                
-                                
                                 id="selectedTab"),
                  
-                    # Add a logout button
-                    
-                    #id = "contenta",
-                    selectInput(
-                      inputId = "HoursBack",
-                      label = "Hours:",
-                      selected = "5",
-                      choices = c(2:24)
-                    ),
-                    
-                    # selectInput(
-                    #   inputId = "YearMerge",
-                    #   label = "Year:",
-                    #   selected = "2024",
-                    #   choices = c("2024")
-                    # ),
-                    # selectInput(
-                    #   inputId = "MonthsMerge",
-                    #   label = "Month",
-                    #   selected = "1",
-                    #   choices = c(1:12)),
-                    # fluidRow(
-                    #   column(5,
-                    #          actionButton("Month_back", "Back Month",width = 120)),
-                    #   column(5,
-                    #          actionButton("Month_forward", "Forward Month",width = 120))),
-                   
+                   dateRangeInput("dates", 
+                                  "Date range",
+                                  start = Sys.Date()-days(7), 
+                                  end = Sys.Date()),
+                   #BOOKMARK FOR NOW textOutput("DateRange"),
+                  
                       selectInput(
                       inputId = "EXTEND_ID",
                       label = "EXTEND_ID:",
-                      choices = c("LDESS_1_Macmerry")
+                      selected = "EXT0007",
+                      choices = c("EXT0007",
+                                  "EXT0008")
                       
                     ),
                     sliderInput( inputId = "CyclesMerge",
@@ -73,7 +54,6 @@ ui <- dashboardPage(
                                  max = 1,
                                  value= c(0,1),
                                  step =.01), 
-                   actionButton("refreshButton", "Refresh", icon = icon("refresh")),
                    downloadButton("downloadXLS", "Download XLS", icon = icon("download"))
                     
   ),

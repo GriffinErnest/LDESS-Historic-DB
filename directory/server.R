@@ -1,60 +1,94 @@
 #Write server output
 server <- function(input, output, session){
-  
   #####
+  #wip code
+  #####
+  #BOOKMARK FOR NOW
+  #text to display for date inputs
+  # output$DateRange <- renderText({
+  #   # make sure end date later than start date
+  #   validate(
+  #     need(input$dates[2] > input$dates[1], "end date is earlier than start date"
+  #     )
+  #   )
+  #   # paste("Date Range:",
+  #   #       difftime(input$dates[2], input$dates[1], units="days") %>% as.character(),
+  #   #       "days")
+  # })
+  
+  # # fill empty time index
+  # full_datetime_range <- seq.POSIXt(from = min(DF$DateTime), to = max(DF$DateTime), by = "min") #create list of times
+  # blank_df <- data.frame(DateTime = full_datetime_range) # creat blank df with all the times
+  # DF <- merge(DF, blank_df, by = "DateTime", all = TRUE) #merge with master table
+  # #####
   #Data Extraction  
   #####
-  refresh_trigger <- reactiveVal(0)
+
   Master_DF <- reactive({
-    refresh_trigger()
-    HoursBack <- input$HoursBack
-    #FOR TESTING
-    # HoursBack <- 10
-    #use hours back to define timeframe
-    current_DT <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-    current_date <- format(as.POSIXct(current_DT, format = "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d")
-    current_hour <- format(as.POSIXct(current_DT, format = "%Y-%m-%d %H:%M:%S"), "%H")
-    current_min <- format(as.POSIXct(current_DT, format = "%Y-%m-%d %H:%M:%S"), "%M")
-    current_sec <- "00" #format(as.POSIXct(current_DT, format = "%Y-%m-%d %H:%M:%S"), "%S")
+    #db information:
+      db <- 'ldess_db'
+      host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+      db_port <- '5432'  # Specify the port (e.g., 5432)
+      db_user <- 'ldess_hist_dashboard'
+      db_password <- 'SIE09375SDKJF'
+      schema_name <- input$EXTEND_ID %>% tolower()
+      #schema_name <- "ext0007" #FOR TESTING
+      table_name <- "sensor_logs"
+      
+    #query information
+      enddate <- input$dates[2] %>% as.character()
+      startdate <- input$dates[1] %>% as.character()
+      #enddate <- as.character(Sys.Date())
+      #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+   
+    #connect, define and run query   
+    con <- dbConnect(RPostgres::Postgres(),
+                     dbname = db,
+                     host = host_db,
+                     port = db_port,
+                     user = db_user,
+                     password = db_password)
     
-    past_DT <- format(Sys.time() - hours(as.numeric(HoursBack)), "%Y-%m-%d %H:%M:%S") 
-    past_date <- format(as.POSIXct(past_DT, format = "%Y-%m-%d %H:%M:%S"), "%Y-%m-%d") 
-    past_hour <- format(as.POSIXct(past_DT, format = "%Y-%m-%d %H:%M:%S"), "%H")
-    past_min <- format(as.POSIXct(past_DT, format = "%Y-%m-%d %H:%M:%S"), "%M")
-    past_sec <- "00" #format(as.POSIXct(past_DT, format = "%Y-%m-%d %H:%M:%S"), "%S")
+    query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
+    result <- dbGetQuery(con, query)
+    
+    dbDisconnect(con) #disconnect
+  
+    return(result) 
+    })
+  
+  Master_DF_2_pre <- reactive({  
+    DF <- Master_DF()
+    CyclesMerge <- input$CyclesMerge
+    
+    #define actual maximum and minimum values in the data  
+    min <- DF$DateTime %>% min() #corresponds to 0
+    max <- DF$DateTime %>% max() #corressponds to 1
+    #grab the difference
+    diff <- max - min
+    #grab the minimum andmaximum selected inputs and get the distance between those values and 0 and 1 respectivly
+    minselect <- CyclesMerge %>% min()
+    propmingap <- minselect
+    maxselect <- CyclesMerge %>% max()
+    propmaxgap <- 1 - maxselect
+    #calculate from these the actual min and max value
+    minval <- minselect*diff + min
+    maxval <- max - propmaxgap*diff
+    #filter out based on these
+    DF <- DF[DF$DateTime >= minval & DF$DateTime <= maxval, ]
+   
+    
+    return(DF) 
     
     
-    #maintenence log
-    #url <- paste0("http://89.197.203.66:3000/sc_maintenance_log?dateFrom=",past_date,"T",past_hour,":",past_min,":",past_sec,"Z&dateTo=",current_date,"T",current_hour,":",current_min,":",current_sec,"Z") #PRODUCTION
-    #FOR TESTING #url <- "http://192.168.1.106:3000/sc_maintenance_log?dateFrom=2024-06-07T00:00:00Z&dateTo=2024-06-07T08:00:00Z"
-    #FOR TESTING #url <- "http://89.197.203.66:3000/sc_maintenance_log?dateFrom=2024-05-28T00:00:00Z&dateTo=2024-05-28T16:00:00Z"
-    url <- paste0("http://192.168.1.106:3000/sc_maintenance_log?dateFrom=",past_date,"T",past_hour,":",past_min,":",past_sec,"Z&dateTo=",current_date,"T",current_hour,":",current_min,":",current_sec,"Z")
+  })
+  
+  #calculated columns
+  Master_DF_2 <- reactive({  
+    DF <- Master_DF_2_pre()
     
     
-    handle <- new_handle()
-    res <- curl(url = url, handle = handle)
-    json <- fromJSON(res,flatten = TRUE)
-    DF <- as.data.frame(json)
     
-    # Unnest the list column
-    DF <- DF %>% unnest_wider(input_registers,names_sep = ",")
-    DF <- DF %>% unnest_wider(discrete_registers ,names_sep = ",")
-    
-    #change timestamp to datetime
-    DF$date_time <- as.POSIXct(DF$date_time, format="%Y-%m-%dT%H:%M:%S", tz="UTC")
-    #convert to current dateteme by adding an hour
-    DF$date_time <- DF$date_time + 1 * 60 * 60 
-    # DF$DateTime <-DF$date_time
-    # DF$date_time <- NULL
-    
-    register_mapping <- read_excel("register_mapping.xlsx",sheet = "register_mapping")
-    
-    for(i in colnames(DF)){
-      if(any(register_mapping$Register_number %in% i)){
-        colnames(DF)[colnames(DF)==i] <- register_mapping[register_mapping$Register_number %in% i, colnames(register_mapping) == "Label" ]
-      }}
-    #remove Nulls
-    DF <- DF[,!is.na(colnames(DF))]
     #correct temperatures
     temperature_columns <- c("HS_TS1",
                              "HS_TS2",
@@ -121,13 +155,13 @@ server <- function(input, output, session){
                              "FS6_TS"    ,                      
                              "FS7_TS"     ,                     
                              "FS8_TS",
-                              "FS1_FS",
+                             "FS1_FS",
                              "FS2_FS",
                              "FS3_FS",
                              "FS4_FS",
                              "FS5_FS",
                              "FS6_FS"
-                             )
+    )
     for(i in temperature_columns){
       DF[,colnames(DF) %in% i] <- DF[,colnames(DF) %in% i] / 100
     }
@@ -136,39 +170,22 @@ server <- function(input, output, session){
                  "PM2_I",
                  "PM3_I",
                  "PM4_I"
-                 )
+    )
     for(i in current){
       DF[,colnames(DF) %in% i] <- DF[,colnames(DF) %in% i] / 1000
-      }
+    }
+    #change SOC variables to numeric
+    DF$HWB_SOC_pct <- DF$HWB_SOC_pct %>% as.numeric()
+    DF$CHB_SOC_pct <- DF$CHB_SOC_pct %>% as.numeric()
     
     #clean operating mode
     Mode_mapping <- read_excel("register_mapping.xlsx",sheet = "Op_mode")
     
-    DF$Hex_mode <- as.hexmode(DF$SYS_CURR_OPM) 
-    #DF$Hex_mode <- gsub("^0+", "", DF$Hex_mode)
-    DF$OP_Mode <-  Mode_mapping$State[match(DF$Hex_mode, Mode_mapping$Reading)]
+    DF$Hex_mode <- as.hexmode(DF$SYS_CURR_OPM)
+    DF$OP_Mode <- lapply(DF$Hex_mode, function(x) {
+      Mode_mapping$State[match(x, Mode_mapping$Reading)]
+    })
     
-    DF })
-  
-  Master_DF_2_pre <- reactive({  
-    DF <- Master_DF()
-    CyclesMerge <- input$CyclesMerge
-    
-    #define actual maximum and minimum values in the data  
-    min <- DF$date_time %>% min() #corresponds to 0
-    max <- DF$date_time %>% max() #corressponds to 1
-    #grab the difference
-    diff <- max - min
-    #grab the minimum andmaximum selected inputs and get the distance between those values and 0 and 1 respectivly
-    minselect <- CyclesMerge %>% min()
-    propmingap <- minselect
-    maxselect <- CyclesMerge %>% max()
-    propmaxgap <- 1 - maxselect
-    #calculate from these the actual min and max value
-    minval <- minselect*diff + min
-    maxval <- max - propmaxgap*diff
-    #filter out based on these
-    DF <- DF[DF$date_time >= minval & DF$date_time <= maxval, ]
     
     #create averages for SHB
     #Create a mean TS reading for Extend battery
@@ -212,15 +229,6 @@ server <- function(input, output, session){
          DF$CHB_TS4_1 +
          DF$CHB_TS5_1 +
          DF$CHB_TS6_1) / 6
-    
-    return(DF) 
-    
-    
-  })
-  
-  #calculated columns
-  Master_DF_2 <- reactive({  
-    DF <- Master_DF_2_pre()
     #water specific heat
     specific_heat_water <- 4.187
     #Potassium Formate Specific Heat approximation
@@ -236,16 +244,6 @@ server <- function(input, output, session){
     return(DF)
   })
     
-  observeEvent(input$refreshButton, {
-    # Code to refresh your dashboard here
-    # For example, update reactive values or re-render plots
-    # ...
-    refresh_trigger(refresh_trigger() + 1)
-  })
-  
-  observeEvent(input$dropdown, {
-    refresh_trigger(refresh_trigger() + 1)
-  })
   
   #####
   #TABLE
@@ -253,9 +251,9 @@ server <- function(input, output, session){
   output$OP_mode_table <- renderDataTable({
     DF <- Master_DF_2()
     
-    temp <- DF[,colnames(DF) %in% c("date_time","OP_Mode","DV1","DV2","DV3" ,"DV4","DV5","DV6","DV7","DV8", "MV1","MV2", "MV3")]
-    temp <- temp[order(temp$date_time,decreasing = TRUE),]
-    temp$date_time <- as.POSIXct(temp$date_time) %>% as.character()
+    temp <- DF[,colnames(DF) %in% c("DateTime","OP_Mode","DV1","DV2","DV3" ,"DV4","DV5","DV6","DV7","DV8", "MV1","MV2", "MV3")]
+    temp <- temp[order(temp$DateTime,decreasing = TRUE),]
+    temp$DateTime <- as.POSIXct(temp$DateTime) %>% as.character()
     return(temp)
   })
   
@@ -267,23 +265,30 @@ server <- function(input, output, session){
   output$HeatLoad <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- c("SHB_Electrical_Heat_load", "HP_Brine_Heat_load", "HP_output_Heat_load", "SH_toHX_Heat_load", "SH_fromHX_Heat_load", "HP_toThermino_Heat_load" )
     thesecolumns <- append(reqCols,wantedCols)
     
+    # fill empty time index
+    full_datetime_range <- seq.POSIXt(from = min(DF$DateTime), to = max(DF$DateTime), by = "min") #create list of times
+    blank_df <- data.frame(DateTime = full_datetime_range) # creat blank df with all the times
+    DF <- merge(DF, blank_df, by = "DateTime", all = TRUE) #merge with master table
+    
+
+    
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "date_time"], y = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "value"], name = "SHB_Electrical_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "date_time"], y = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "value"], name = "HP_Brine_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HP_output_Heat_load",colnames(data) == "date_time"], y = data[data$variable == "HP_output_Heat_load",colnames(data) == "value"], name = "HP_output_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "date_time"], y = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "value"], name = "SH_toHX_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "date_time"], y = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "value"], name = "SH_fromHX_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "date_time"], y = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "value"], name = "HP_toThermino_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "value"], name = "SHB_Electrical_Heat_load", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "value"], name = "HP_Brine_Heat_load", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "HP_output_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_output_Heat_load",colnames(data) == "value"], name = "HP_output_Heat_load", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "value"], name = "SH_toHX_Heat_load", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "value"], name = "SH_fromHX_Heat_load", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "value"], name = "HP_toThermino_Heat_load", mode = "markers", type = "scatter")   # Add traces
     
     
     
@@ -316,7 +321,7 @@ server <- function(input, output, session){
   output$PowerPlot <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- c("PM4_I",
@@ -326,14 +331,14 @@ server <- function(input, output, session){
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "PM1_I",colnames(data) == "date_time"], y = data[data$variable == "PM1_I",colnames(data) == "value"], name = "Heat Pump", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "PM2_I",colnames(data) == "date_time"], y = data[data$variable == "PM2_I",colnames(data) == "value"], name = "Extend Element", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "PM3_I",colnames(data) == "date_time"], y = data[data$variable == "PM3_I",colnames(data) == "value"], name = "Thermino Element", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "PM4_I",colnames(data) == "date_time"], y = data[data$variable == "PM4_I",colnames(data) == "value"], name = "Ballance of Plant", mode = "lines+markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "PM1_I",colnames(data) == "DateTime"], y = data[data$variable == "PM1_I",colnames(data) == "value"], name = "Heat Pump", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "PM2_I",colnames(data) == "DateTime"], y = data[data$variable == "PM2_I",colnames(data) == "value"], name = "Extend Element", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "PM3_I",colnames(data) == "DateTime"], y = data[data$variable == "PM3_I",colnames(data) == "value"], name = "Thermino Element", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "PM4_I",colnames(data) == "DateTime"], y = data[data$variable == "PM4_I",colnames(data) == "value"], name = "Ballance of Plant", mode = "markers", type = "scatter")   # Add traces
       
     
     
@@ -366,7 +371,7 @@ server <- function(input, output, session){
   output$SOCPlot <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN) 
     wantedCols <- c("HWB_SOC_pct",
@@ -374,12 +379,12 @@ server <- function(input, output, session){
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "date_time"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"], name = "HWB SOC %", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "date_time"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"], name = "CHB SOC %", mode = "lines+markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"], name = "HWB SOC %", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"], name = "CHB SOC %", mode = "markers", type = "scatter")   # Add traces
    
     
     # Set figure title, x and y-axes titles
@@ -408,13 +413,13 @@ server <- function(input, output, session){
   })
   
   
-  
+  ########
   #HWB Plots
   ########
   output$HWB_top <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- c("HWB_TSB","HWB_TSM","HWB_TST","HWB_SOC_pct")
@@ -423,22 +428,24 @@ server <- function(input, output, session){
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+   
+    
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     
     if(any(wantedCols %in% c("HWB_TSB","HWB_TSM","HWB_TST"))){
       if(wantedCols %in% c("HWB_SOC_pct") %>% any){ #two axis plot
         fig <- plot_ly()
-        fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "date_time"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+        fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "markers", type = "scatter")   # Add traces
         if(wantedCols %in% c("HWB_TSB")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "date_time"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HWB_TST")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TST",colnames(data) == "date_time"], y = data[data$variable == "HWB_TST",colnames(data) == "value"], name = "TST", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TST",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TST",colnames(data) == "value"], name = "TST", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HWB_TSM")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSM",colnames(data) == "date_time"], y = data[data$variable == "HWB_TSM",colnames(data) == "value"], name = "TSM", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSM",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSM",colnames(data) == "value"], name = "TSM", mode = "markers", type = "scatter")
         }
         
         
@@ -474,13 +481,13 @@ server <- function(input, output, session){
       }else{ #just one axis(TS)
         fig <- plot_ly()
         if(wantedCols %in% c("HWB_TSB")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "date_time"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HWB_TST")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TST",colnames(data) == "date_time"], y = data[data$variable == "HWB_TST",colnames(data) == "value"], name = "TST", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TST",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TST",colnames(data) == "value"], name = "TST", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HWB_TSM")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSM",colnames(data) == "date_time"], y = data[data$variable == "HWB_TSM",colnames(data) == "value"], name = "TSM", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSM",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSM",colnames(data) == "value"], name = "TSM", mode = "markers", type = "scatter")
         }
         
         
@@ -507,7 +514,7 @@ server <- function(input, output, session){
       }
     }else if(wantedCols %in% c("HWB_SOC_pct")){ #just one axis (SOC)
       fig <- plot_ly()
-      fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "date_time"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "markers", type = "scatter")   # Add traces
       
       
       
@@ -539,21 +546,21 @@ server <- function(input, output, session){
   output$HWB_bottom <- renderPlotly({
       DF <- Master_DF_2()
       # plottemp <- temp
-      reqCols <- c("date_time")
+      reqCols <- c("DateTime")
       # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
       # thesecolumns <- append(reqCols,IN)
      wantedCols <- c("FS3_FS","HS_TS4","HS_TS5")
       thesecolumns <- append(reqCols,wantedCols)
 
       DF <- DF[,colnames(DF) %in% thesecolumns]
-      data <- reshape2::melt(DF,id.var = c("date_time"))
+      data <- reshape2::melt(DF,id.var = c("DateTime"))
       #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
       #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
 
           fig <- plot_ly()
-          fig <- fig %>% add_trace(x = data[data$variable == "FS3_FS",colnames(data) == "date_time"], y = data[data$variable == "FS3_FS",colnames(data) == "value"],yaxis = "y2", name = "FS3", mode = "lines+markers", type = "scatter")   # Add traces
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "date_time"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "HS_TS4", mode = "lines+markers", type = "scatter")
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "date_time"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "HS_TS5", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "FS3_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS3_FS",colnames(data) == "value"],yaxis = "y2", name = "FS3", mode = "markers", type = "scatter")   # Add traces
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "HS_TS4", mode = "markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "HS_TS5", mode = "markers", type = "scatter")
           
 
 
@@ -588,137 +595,24 @@ server <- function(input, output, session){
           return(fig)
         })
   
-  #with choises
-  # output$HWB_bottom <- renderPlotly({
-  #   DF <- Master_DF_2()
-  #   # plottemp <- temp
-  #   reqCols <- c("date_time")
-  #   # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
-  #   # thesecolumns <- append(reqCols,IN)
-  #   wantedCols <- c("HS_TS4","HS_TS5","FS3_FS")
-  #   #FOR TESTING
-  #   wantedCols <- input$HWB_TSFS
-  #   thesecolumns <- append(reqCols,wantedCols)
-  #   
-  #   DF <- DF[,colnames(DF) %in% thesecolumns]
-  #   data <- reshape2::melt(DF,id.var = c("date_time"))
-  #   #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
-  #   #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
-  #   
-  #   if(any(wantedCols %in% c("HS_TS4","HS_TS5"))){
-  #     if(wantedCols %in% c("FS3_FS") %>% any){ #two axis plot
-  #       fig <- plot_ly()
-  #       fig <- fig %>% add_trace(x = data[data$variable == "FS3_FS",colnames(data) == "date_time"], y = data[data$variable == "FS3_FS",colnames(data) == "value"],yaxis = "y2", name = "FS3", mode = "lines+markers", type = "scatter")   # Add traces
-  #       if(wantedCols %in% c("HS_TS4")  %>% any()){
-  #         fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "date_time"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "HS_TS4", mode = "lines+markers", type = "scatter")
-  #       }
-  #       if(wantedCols %in% c("HS_TS5")  %>% any()){
-  #         fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "date_time"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "HS_TS5", mode = "lines+markers", type = "scatter")
-  #       }
-  #       
-  #       
-  #       ay <- list(
-  #         tickfont = list(color = "red"),
-  #         overlaying = "y",
-  #         side = "right",
-  #         title = "<b>Flow</b> Thermino")
-  #       
-  #       
-  #       
-  #       # Set figure title, x and y-axes titles
-  #       fig <- fig %>% layout(
-  #         title = list(text = "<b>Thermino Hydronics: hot water draw<b>", x=.2, y=1.1), 
-  #         margin = list(l = 30, r = 50, b = 10, t = 40),
-  #         yaxis2 = ay,
-  #         xaxis = list(title="Datetime"),
-  #         yaxis = list(title="<b>Temperature</b> Thermino Hydronics")
-  #       )%>%
-  #         layout(plot_bgcolor='#e5ecf6',
-  #                legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
-  #                xaxis = list(
-  #                  zerolinecolor = '#ffff',
-  #                  zerolinewidth = 2,
-  #                  gridcolor = 'ffff'),
-  #                yaxis = list(
-  #                  zerolinecolor = '#ffff',
-  #                  zerolinewidth = 2,
-  #                  gridcolor = 'ffff'))
-  #       
-  #       
-  #       return(fig)
-  #     }else{ #just one axis(TS)
-  #       fig <- plot_ly()
-  #       if(wantedCols %in% c("HS_TS4")  %>% any()){
-  #         fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "date_time"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "HS_TS4", mode = "lines+markers", type = "scatter")
-  #       }
-  #       if(wantedCols %in% c("HS_TS5")  %>% any()){
-  #         fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "date_time"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "HS_TS5", mode = "lines+markers", type = "scatter")
-  #       }
-  #       
-  #       
-  #       # Set figure title, x and y-axes titles
-  #       fig <- fig %>% layout(
-  #         title = list(text = "<b>Thermino Hydronics: hot water draw<b>", x=.2, y=1.1), 
-  #         margin = list(l = 30, r = 50, b = 10, t = 40),
-  #         xaxis = list(title="Datetime"),
-  #         yaxis = list(title="<b>Temperature</b> Thermino Hydronics")
-  #       )%>%
-  #         layout(plot_bgcolor='#e5ecf6',
-  #                legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
-  #                xaxis = list(
-  #                  zerolinecolor = '#ffff',
-  #                  zerolinewidth = 2,
-  #                  gridcolor = 'ffff'),
-  #                yaxis = list(
-  #                  zerolinecolor = '#ffff',
-  #                  zerolinewidth = 2,
-  #                  gridcolor = 'ffff'))
-  #       
-  #       return(fig)
-  #     }
-  #   }else if(wantedCols %in% c("FS3_FS") %>% any()){ #just one axis (SOC)
-  #     fig <- plot_ly()
-  #     fig <- fig %>% add_trace(x = data[data$variable == "FS3_FS",colnames(data) == "date_time"], y = data[data$variable == "FS3_FS",colnames(data) == "value"], name = "FS3", mode = "lines+markers", type = "scatter")   # Add traces
-  #     
-  #     # Set figure title, x and y-axes titles
-  #     fig <- fig %>% layout(
-  #       title = list(text = "<b>Thermino Hydronics: hot water draw<b>", x=.2, y=1.1), 
-  #       margin = list(l = 30, r = 50, b = 10, t = 40),
-  #       xaxis = list(title="Datetime"),
-  #       yaxis = list(title="<b>Flow</b> Thermino")
-  #     )%>%
-  #       layout(plot_bgcolor='#e5ecf6',
-  #              legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
-  #              xaxis = list(
-  #                zerolinecolor = '#ffff',
-  #                zerolinewidth = 2,
-  #                gridcolor = 'ffff'),
-  #              yaxis = list(
-  #                zerolinecolor = '#ffff',
-  #                zerolinewidth = 2,
-  #                gridcolor = 'ffff'))
-  #     return(fig)
-  #   }
-  #   
-  # })
-  
+ 
   output$HWB_bottomid <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- c("FS2_FS","HS_TS2","HS_TS3")
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "FS2_FS",colnames(data) == "date_time"], y = data[data$variable == "FS2_FS",colnames(data) == "value"],yaxis = "y2", name = "FS2", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HS_TS2",colnames(data) == "date_time"], y = data[data$variable == "HS_TS2",colnames(data) == "value"], name = "HS_TS2", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HS_TS3",colnames(data) == "date_time"], y = data[data$variable == "HS_TS3",colnames(data) == "value"], name = "HS_TS3", mode = "lines+markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "FS2_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS2_FS",colnames(data) == "value"],yaxis = "y2", name = "FS2", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "HS_TS2",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS2",colnames(data) == "value"], name = "HS_TS2", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "HS_TS3",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS3",colnames(data) == "value"], name = "HS_TS3", mode = "markers", type = "scatter")   # Add traces
   
     ay <- list(
       tickfont = list(color = "red"),
@@ -754,7 +648,7 @@ server <- function(input, output, session){
   output$HWB_bottomer <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- input$HWB_PM
@@ -763,30 +657,30 @@ server <- function(input, output, session){
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
     if(wantedCols %in% c("PM1_PF")  %>% any()){
-        fig <- fig %>% add_trace(x = data[data$variable == "PM1_PF",colnames(data) == "date_time"], y = data[data$variable == "PM1_PF",colnames(data) == "value"], name = "PM1_PF", mode = "lines+markers", type = "scatter")
+        fig <- fig %>% add_trace(x = data[data$variable == "PM1_PF",colnames(data) == "DateTime"], y = data[data$variable == "PM1_PF",colnames(data) == "value"], name = "PM1_PF", mode = "markers", type = "scatter")
     }
     if(wantedCols %in% c("PM1_I")  %>% any()){
-      fig <- fig %>% add_trace(x = data[data$variable == "PM1_I",colnames(data) == "date_time"], y = data[data$variable == "PM1_I",colnames(data) == "value"], name = "PM1_I", mode = "lines+markers", type = "scatter")
+      fig <- fig %>% add_trace(x = data[data$variable == "PM1_I",colnames(data) == "DateTime"], y = data[data$variable == "PM1_I",colnames(data) == "value"], name = "PM1_I", mode = "markers", type = "scatter")
     }
     if(wantedCols %in% c("PM1_V")  %>% any()){
-      fig <- fig %>% add_trace(x = data[data$variable == "PM1_V",colnames(data) == "date_time"], y = data[data$variable == "PM1_V",colnames(data) == "value"], name = "PM1_V", mode = "lines+markers", type = "scatter")
+      fig <- fig %>% add_trace(x = data[data$variable == "PM1_V",colnames(data) == "DateTime"], y = data[data$variable == "PM1_V",colnames(data) == "value"], name = "PM1_V", mode = "markers", type = "scatter")
     }
     if(wantedCols %in% c("PM1_PWH")  %>% any()){
-      fig <- fig %>% add_trace(x = data[data$variable == "PM1_PWH",colnames(data) == "date_time"], y = data[data$variable == "PM1_PWH",colnames(data) == "value"], name = "PM1_PWH", mode = "lines+markers", type = "scatter")
+      fig <- fig %>% add_trace(x = data[data$variable == "PM1_PWH",colnames(data) == "DateTime"], y = data[data$variable == "PM1_PWH",colnames(data) == "value"], name = "PM1_PWH", mode = "markers", type = "scatter")
     }
     if(wantedCols %in% c("PM1_PVA")  %>% any()){
-      fig <- fig %>% add_trace(x = data[data$variable == "PM1_PVA",colnames(data) == "date_time"], y = data[data$variable == "PM1_PVA",colnames(data) == "value"], name = "PM1_PVA", mode = "lines+markers", type = "scatter")
+      fig <- fig %>% add_trace(x = data[data$variable == "PM1_PVA",colnames(data) == "DateTime"], y = data[data$variable == "PM1_PVA",colnames(data) == "value"], name = "PM1_PVA", mode = "markers", type = "scatter")
     }
     if(wantedCols %in% c("PM1_W")  %>% any()){
-      fig <- fig %>% add_trace(x = data[data$variable == "PM1_W",colnames(data) == "date_time"], y = data[data$variable == "PM1_W",colnames(data) == "value"], name = "PM1_W", mode = "lines+markers", type = "scatter")
+      fig <- fig %>% add_trace(x = data[data$variable == "PM1_W",colnames(data) == "DateTime"], y = data[data$variable == "PM1_W",colnames(data) == "value"], name = "PM1_W", mode = "markers", type = "scatter")
     }
     if(wantedCols %in% c("PM1_FR")  %>% any()){
-      fig <- fig %>% add_trace(x = data[data$variable == "PM1_FR",colnames(data) == "date_time"], y = data[data$variable == "PM1_FR",colnames(data) == "value"], name = "PM1_FR", mode = "lines+markers", type = "scatter")
+      fig <- fig %>% add_trace(x = data[data$variable == "PM1_FR",colnames(data) == "DateTime"], y = data[data$variable == "PM1_FR",colnames(data) == "value"], name = "PM1_FR", mode = "markers", type = "scatter")
     }
 
         # Set figure title, x and y-axes titles
@@ -818,7 +712,7 @@ server <- function(input, output, session){
   output$SHB_top <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- c("CHB_TS1_AVG","CHB_TS2_AVG","CHB_TS3_AVG","CHB_TS4_AVG","CHB_TS5_AVG","CHB_SOC_pct")
@@ -827,26 +721,26 @@ server <- function(input, output, session){
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     
     if(any(wantedCols %in% c("CHB_TS1_AVG","CHB_TS2_AVG","CHB_TS3_AVG","CHB_TS4_AVG","CHB_TS5_AVG"))){
       if(wantedCols %in% c("CHB_SOC_pct") %>% any){ #two axis plot
         fig <- plot_ly()
-        fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "date_time"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+        fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "markers", type = "scatter")   # Add traces
         if(wantedCols %in% c("CHB_TS1_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS2_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS2_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS2_AVG",colnames(data) == "value"], name = "CHB_TS2_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS2_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS2_AVG",colnames(data) == "value"], name = "CHB_TS2_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS3_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS3_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS3_AVG",colnames(data) == "value"], name = "CHB_TS3_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS3_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS3_AVG",colnames(data) == "value"], name = "CHB_TS3_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS5_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS5_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS5_AVG",colnames(data) == "value"], name = "CHB_TS5_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS5_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS5_AVG",colnames(data) == "value"], name = "CHB_TS5_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS4_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS4_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS4_AVG",colnames(data) == "value"], name = "CHB_TS4_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS4_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS4_AVG",colnames(data) == "value"], name = "CHB_TS4_AVG", mode = "markers", type = "scatter")
         }
         
         
@@ -882,19 +776,19 @@ server <- function(input, output, session){
       }else{ #just one axis(TS)
         fig <- plot_ly()
         if(wantedCols %in% c("CHB_TS1_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS2_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS2_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS2_AVG",colnames(data) == "value"], name = "CHB_TS2_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS2_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS2_AVG",colnames(data) == "value"], name = "CHB_TS2_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS3_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS3_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS3_AVG",colnames(data) == "value"], name = "CHB_TS3_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS3_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS3_AVG",colnames(data) == "value"], name = "CHB_TS3_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS5_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS5_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS5_AVG",colnames(data) == "value"], name = "CHB_TS5_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS5_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS5_AVG",colnames(data) == "value"], name = "CHB_TS5_AVG", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("CHB_TS4_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS4_AVG",colnames(data) == "date_time"], y = data[data$variable == "CHB_TS4_AVG",colnames(data) == "value"], name = "CHB_TS4_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS4_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS4_AVG",colnames(data) == "value"], name = "CHB_TS4_AVG", mode = "markers", type = "scatter")
         }
         
         # Set figure title, x and y-axes titles
@@ -920,7 +814,7 @@ server <- function(input, output, session){
       }
     }else if(wantedCols %in% c("CHB_SOC_pct")){ #just one axis (SOC)
       fig <- plot_ly()
-      fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "date_time"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "markers", type = "scatter")   # Add traces
       
       
       
@@ -951,7 +845,7 @@ server <- function(input, output, session){
   output$SHB_bottom <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     # wantedCols <- c("HS_TS10","HS_TS11","HS_TS12","FS5_FS")
@@ -960,22 +854,22 @@ server <- function(input, output, session){
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     
     if(any(wantedCols %in% c("HS_TS10","HS_TS11","HS_TS12"))){
       if(wantedCols %in% c("FS5_FS") %>% any){ #two axis plot
         fig <- plot_ly()
-        fig <- fig %>% add_trace(x = data[data$variable == "FS5_FS",colnames(data) == "date_time"], y = data[data$variable == "FS5_FS",colnames(data) == "value"],yaxis = "y2", name = "FS5", mode = "lines+markers", type = "scatter")   # Add traces
+        fig <- fig %>% add_trace(x = data[data$variable == "FS5_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS5_FS",colnames(data) == "value"],yaxis = "y2", name = "FS5", mode = "markers", type = "scatter")   # Add traces
         if(wantedCols %in% c("HS_TS10")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS10",colnames(data) == "date_time"], y = data[data$variable == "HS_TS10",colnames(data) == "value"], name = "HS_TS10", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS10",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS10",colnames(data) == "value"], name = "HS_TS10", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HS_TS11")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS11",colnames(data) == "date_time"], y = data[data$variable == "HS_TS11",colnames(data) == "value"], name = "HS_TS11", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS11",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS11",colnames(data) == "value"], name = "HS_TS11", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HS_TS12")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS12",colnames(data) == "date_time"], y = data[data$variable == "HS_TS12",colnames(data) == "value"], name = "HS_TS12", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS12",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS12",colnames(data) == "value"], name = "HS_TS12", mode = "markers", type = "scatter")
         }
         
         
@@ -1011,13 +905,13 @@ server <- function(input, output, session){
       }else{ #just one axis(TS)
         fig <- plot_ly()
         if(wantedCols %in% c("HS_TS10")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS10",colnames(data) == "date_time"], y = data[data$variable == "HS_TS10",colnames(data) == "value"], name = "HS_TS10", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS10",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS10",colnames(data) == "value"], name = "HS_TS10", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HS_TS11")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS11",colnames(data) == "date_time"], y = data[data$variable == "HS_TS11",colnames(data) == "value"], name = "HS_TS11", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS11",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS11",colnames(data) == "value"], name = "HS_TS11", mode = "markers", type = "scatter")
         }
         if(wantedCols %in% c("HS_TS12")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS12",colnames(data) == "date_time"], y = data[data$variable == "HS_TS12",colnames(data) == "value"], name = "HS_TS12", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS12",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS12",colnames(data) == "value"], name = "HS_TS12", mode = "markers", type = "scatter")
         }
         
         
@@ -1043,7 +937,7 @@ server <- function(input, output, session){
       }
     }else if(wantedCols %in% c("FS5_FS") %>% any()){ #just one axis (SOC)
       fig <- plot_ly()
-      fig <- fig %>% add_trace(x = data[data$variable == "FS5_FS",colnames(data) == "date_time"], y = data[data$variable == "FS5_FS",colnames(data) == "value"], name = "FS5", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "FS5_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS5_FS",colnames(data) == "value"], name = "FS5", mode = "markers", type = "scatter")   # Add traces
       
       # Set figure title, x and y-axes titles
       fig <- fig %>% layout(
@@ -1069,18 +963,18 @@ server <- function(input, output, session){
   output$SHB_bottomer <- renderPlotly({
     DF <- Master_DF_2()
     # plottemp <- temp
-    reqCols <- c("date_time")
+    reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
     wantedCols <- c("PM2_PVA")
     thesecolumns <- append(reqCols,wantedCols)
     
     DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("date_time"))
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "PM2_PVA",colnames(data) == "date_time"], y = data[data$variable == "PM2_PVA",colnames(data) == "value"], name = "PM2_PVA", mode = "lines+markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "PM2_PVA",colnames(data) == "DateTime"], y = data[data$variable == "PM2_PVA",colnames(data) == "value"], name = "PM2_PVA", mode = "markers", type = "scatter")   # Add traces
     
     
     
