@@ -1,0 +1,13 @@
+name: LDESS_Historic
+title: LDESS_Historic
+username: gesnmp
+account: gesnmp
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 12169836
+bundleId: 8762658
+url: https://gesnmp.shinyapps.io/LDESS_Historic/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: www/Extend.png|www/Sunamp.png

@@ -1,0 +1,12 @@
+name: directory
+title: directory
+username: gesnmp
+account: gesnmp
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 12169808
+bundleId: 8731927
+url: https://gesnmp.shinyapps.io/directory/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE

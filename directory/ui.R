@@ -24,23 +24,11 @@ library(DBI) #connecting to sql database
 ####for testing
 ui <- dashboardPage(
   
-  dashboardHeader(title="EXTEND LDESS 1 Data"
+  dashboardHeader(title="EXTEND Historic Data"
+                  
   ),
   dashboardSidebar(width = 300,
-                    
-                    sidebarMenu(menuItem(" Hot Water Battery", tabName = "HWB", icon = icon("shower")),
-                                menuItem(" Space Heating Battery", tabName = "SHB", icon = icon("house-fire")),
-                                menuItem(" Heat Load", tabName = "Heat_Load", icon = icon("gauge")),
-                                menuItem(" Operation Mode", tabName = "OP_MO", icon = icon("table-list")),
-                                id="selectedTab"),
-                 
-                   dateRangeInput("dates", 
-                                  "Date range",
-                                  start = Sys.Date()-days(7), 
-                                  end = Sys.Date()),
-                   #BOOKMARK FOR NOW textOutput("DateRange"),
-                  
-                      selectInput(
+                    selectInput(
                       inputId = "EXTEND_ID",
                       label = "EXTEND_ID:",
                       selected = "EXT0007",
@@ -48,13 +36,51 @@ ui <- dashboardPage(
                                   "EXT0008")
                       
                     ),
+                   sidebarMenu(menuItem(" Hot Water Battery", tabName = "HWB", icon = icon("shower")),
+                                menuItem(" Space Heating Battery", tabName = "SHB", icon = icon("house-fire")),
+                                menuItem(" Heat Load", tabName = "Heat_Load", icon = icon("gauge")),
+                                menuItem(" Operation Mode", tabName = "OP_MO", icon = icon("table-list")),
+                                id="selectedTab"),
+                   dateRangeInput("dates",
+                                  "Date range",
+                                  start = Sys.Date()-days(7),
+                                  end = Sys.Date()#,
+                                  # min = Sys.Date() - 7,  # Minimum date (7 days ago)
+                                  # max = Sys.Date()
+                                  ),
+                   #BOOKMARK FOR NOW textOutput("DateRange"),
+                   #week toggle
+                   fluidRow(
+                     column(5,
+                            actionButton("Week_back", "Back Week",width = 120)),
+                     column(5,
+                            actionButton("Week_forward", "Forward Week",width = 120))),
+                   #day toggle
+                   fluidRow(
+                     column(5,
+                            actionButton("Day_back", "Back Day",width = 120)),
+                     column(5,
+                            actionButton("Day_forward", "Forward Day",width = 120))),
+                   fluidRow(
                     sliderInput( inputId = "CyclesMerge",
                                  label = "Time filter (1=include all)",
                                  min = 0,
                                  max = 1,
                                  value= c(0,1),
-                                 step =.01), 
-                   downloadButton("downloadXLS", "Download XLS", icon = icon("download"))
+                                 step =.01)), 
+                   # fluidRow(
+                   #   column(5,
+                   #          actionButton("Refresh_call", "Refresh", icon = icon("refresh"), width = 120)
+                   #          )
+                   #   ),
+                   
+                   
+                  
+                  
+                   fluidRow(
+                     column(5,
+                            downloadButton("downloadXLS", "Download XLS", icon = icon("download"), width = 120, style = "color: #fff; background-color: #27ae60; border-color: #fff;padding: 5px 14px 5px 14px;margin: 15px 15px 15px 15px; ")
+                     ))
                     
   ),
   
@@ -63,7 +89,7 @@ ui <- dashboardPage(
     tabItems(
       #HOT WATER BATTERY
       tabItem(tabName = "HWB",
-              fluidRow(box(
+                            fluidRow(box(
                 column(
                   selectInput("metric", "Metrics for 24h plot:", choices = c("HWB_TSB","HWB_TSM","HWB_TST","HWB_SOC_pct"),
                               selected =  c("HWB_TSB","HWB_TSM","HWB_TST","HWB_SOC_pct"),
@@ -74,33 +100,57 @@ ui <- dashboardPage(
                 #               multiple = TRUE), 
                   # width = 5 ),
                 column(
-                    selectInput("HWB_PM", "Metrics for Power usage plot:", choices = c("PM1_PF","PM1_I","PM1_V","PM1_PWH","PM1_PVA","PM1_W","PM1_FR"),
-                                selected =  c("PM1_W"),
+                    selectInput("HWB_PM", "Metrics for Power usage plot:", choices = c("PM3_PF","PM3_I","PM3_V","PM3_PWH","PM3_PVA","PM3_FR"),
+                                selected =  c("PM3_PVA"),
                                 multiple = TRUE),
                   width = 5 ),
                 height =100, width = 12)),
-              fluidRow(box(withSpinner(plotlyOutput("HWB_top", height = 350)),width = 12)),
+              conditionalPanel(condition= "input.metric.length > 0",
+              fluidRow(box(withSpinner(plotlyOutput("HWB_top", height = 350)),width = 12))
+              ),
               fluidRow(box(withSpinner(plotlyOutput("HWB_bottom", height = 350)),width = 12)),
               fluidRow(box(withSpinner(plotlyOutput("HWB_bottomid", height = 350)),width = 12)),
-              fluidRow(box(withSpinner(plotlyOutput("HWB_bottomer", height = 350)),width = 12))
+              conditionalPanel(condition= "input.HWB_PM.length > 0",
+                fluidRow(box(withSpinner(plotlyOutput("HWB_bottomer", height = 350)),width = 12))               
+              )
+              
               
       ),
       
       #SPACE HEATING BATTERY
       tabItem(tabName = "SHB",
               fluidRow(box(
-                column(
+                column(5,
+                  fluidRow(
                   selectInput("SHB_TM", "SOC Metrics:", choices = c("CHB_TS1_AVG","CHB_TS2_AVG","CHB_TS3_AVG","CHB_TS4_AVG","CHB_TS5_AVG","CHB_SOC_pct"),
                               selected =  c("CHB_TS1_AVG","CHB_TS2_AVG","CHB_TS3_AVG","CHB_TS4_AVG","CHB_TS5_AVG","CHB_SOC_pct"),
-                              multiple = TRUE),width = 5),
-                column(
+                              multiple = TRUE)),
+                              
+                  fluidRow(
+                    selectInput("SHB_BMid", "Space Heating Metrics:", choices = c("HS_TS6","HS_TS7","HS_TS8","HS_TS9","ROOM_TS19"),
+                                selected =  c("HS_TS6","HS_TS7","HS_TS8","HS_TS9"),
+                                multiple = TRUE)),
+                    ),
+                column(5,
+                  fluidRow(
                   selectInput("SHB_BM", "Metrics for Hydronics plot:", choices = c("HS_TS10","HS_TS11","HS_TS12","FS5_FS"),
                               selected =   c("HS_TS10","HS_TS11","HS_TS12","FS5_FS"),
-                              multiple = TRUE), 
-                  width = 5 ),height =100, width = 12)),
-              fluidRow(box(withSpinner(plotlyOutput("SHB_top", height = 350)),width = 12)),
-              fluidRow(box(withSpinner(plotlyOutput("SHB_bottom", height = 350)),width = 12)),
-              fluidRow(box(withSpinner(plotlyOutput("SHB_bottomer", height = 350)),width = 12))
+                              multiple = TRUE)), 
+                  fluidRow(
+                    selectInput("SHB_BB", "Metrics for Power usage plot:", choices = c("PM2_I","PM2_PW","PM2_PVA","PM2_PWH","PM2_FR","PM2_PF","PM2_V"),
+                                selected =   c("PM2_PVA"),
+                                multiple = TRUE)),
+                  ),
+                  
+                  height =150, width = 12)),
+              conditionalPanel(condition= "input.SHB_TM.length > 0",
+                               fluidRow(box(withSpinner(plotlyOutput("SHB_top", height = 350)),width = 12))),
+              conditionalPanel(condition= "input.SHB_BM.length > 0",
+                               fluidRow(box(withSpinner(plotlyOutput("SHB_bottom", height = 350)),width = 12))),
+              conditionalPanel(condition= "input.SHB_BMid.length > 0",
+                               fluidRow(box(withSpinner(plotlyOutput("SHB_bottomid", height = 350)),width = 12))),
+              conditionalPanel(condition= "input.SHB_BB.length > 0",
+                               fluidRow(box(withSpinner(plotlyOutput("SHB_bottomer", height = 350)),width = 12)))
       ),
       #OPERATIONAL MODE
       tabItem(tabName = "OP_MO",
