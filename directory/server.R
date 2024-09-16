@@ -4,26 +4,7 @@ server <- function(input, output, session){
   #Images
   ######
 
-  #####
-  #wip code
-  #####
-  #BOOKMARK FOR NOW
-  #text to display for date inputs
-  # output$DateRange <- renderText({
-  #   # make sure end date later than start date
-  #   validate(
-  #     need(input$dates[2] > input$dates[1], "end date is earlier than start date"
-  #     )
-  #   )
-  #   # paste("Date Range:",
-  #   #       difftime(input$dates[2], input$dates[1], units="days") %>% as.character(),
-  #   #       "days")
-  # })
-  
-  # # fill empty time index
-  # full_datetime_range <- seq.POSIXt(from = min(DF$DateTime), to = max(DF$DateTime), by = "min") #create list of times
-  # blank_df <- data.frame(DateTime = full_datetime_range) # creat blank df with all the times
-  # DF <- merge(DF, blank_df, by = "DateTime", all = TRUE) #merge with master table
+
   #####
   #buttons
   #####
@@ -47,28 +28,44 @@ server <- function(input, output, session){
                          start = input$dates[1] - 1 ,
                          end = input$dates[2] - 1)})
   
-
-  # #####
-  #Data Extraction  
-  #####
-
-  Master_DF <- reactive({
+#####
+# Functions
+#####
+  LDESS <- reactive({
+    ID <- input$EXTEND_ID
+    if(input$EXTEND_ID  %in% "EXT0007"){
+      output <- 1
+    }else{
+      output <- 2
+    }
+    return(output)
+  })
+  Heat_load_calculator <- function(op_mode,op_mode_string,flow,heat1,heat2,specific_heat){
+    if(any(op_mode %in% op_mode_string) & !(flow == 0)){
+      value <- as.numeric(flow) * as.numeric(specific_heat) * abs(as.numeric(heat1) - as.numeric(heat2))
+    }else{
+      value <- 0
+    }
+    return(value)
+  }
+  #data pull functions
+  sql_table_pull <- function(table_name,startdate,enddate,schema_name){
     #db information:
-      db <- 'ldess_db'
-      host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
-      db_port <- '5432'  # Specify the port (e.g., 5432)
-      db_user <- 'ldess_hist_dashboard'
-      db_password <- 'SIE09375SDKJF'
-      schema_name <- input$EXTEND_ID %>% tolower()
-      #schema_name <- "ext0007" #FOR TESTING
-      table_name <- "sensor_logs"
-      
+    db <- 'ldess_db'
+    host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+    db_port <- '5432'  # Specify the port (e.g., 5432)
+    db_user <- 'ldess_hist_dashboard'
+    db_password <- 'SIE09375SDKJF'
+    #schema_name <- input$EXTEND_ID %>% tolower()
+    #schema_name <- "ext0006" #FOR TESTING
+    #table_name <- "sensor_logs"
+    
     #query information
-      enddate <- input$dates[2] %>% as.character()
-      startdate <- input$dates[1] %>% as.character()
-      #enddate <- as.character(Sys.Date())
-      #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
-   
+    #enddate <- input$dates[2] %>% as.character()
+    #startdate <- input$dates[1] %>% as.character()
+    #enddate <- as.character(Sys.Date())
+    #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+    
     #connect, define and run query   
     con <- dbConnect(RPostgres::Postgres(),
                      dbname = db,
@@ -81,10 +78,292 @@ server <- function(input, output, session){
     result <- dbGetQuery(con, query)
     
     dbDisconnect(con) #disconnect
+    return(result)
+    
+  }
+  ######
+  #Data Extraction  
+  #####
+  #Here we are creating a reacive value with 2 points, enough to trigger a refresh for each query when needed.
+  #every time the button is pushed 2 more points are given to the rv value and the refreshes will run again.
+  #we are preventing one refresh from taking all of the points by giving each command a unique decimal number it will take the points to
   
-    return(result) 
+  stored_opp <- reactiveVal()
+  Operating_DF_pre <- eventReactive(rv(),{
+    if(rv() == 2){
+      # #db information:
+      # db <- 'ldess_db'
+      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+      # db_port <- '5432'  # Specify the port (e.g., 5432)
+      # db_user <- 'ldess_hist_dashboard'
+      # db_password <- 'SIE09375SDKJF'
+      # schema_name <- input$EXTEND_ID %>% tolower()
+      # #schema_name <- "ext0006" #FOR TESTING
+      # table_name <- "opschedule"
+      # 
+      # #query information
+      # enddate <- input$dates[2] %>% as.character()
+      # startdate <- input$dates[1] %>% as.character()
+      # #enddate <- as.character(Sys.Date())
+      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+      # 
+      # #connect, define and run query   
+      # con <- dbConnect(RPostgres::Postgres(),
+      #                  dbname = db,
+      #                  host = host_db,
+      #                  port = db_port,
+      #                  user = db_user,
+      #                  password = db_password)
+      # 
+      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
+      # result <- dbGetQuery(con, query)
+      
+      result <- sql_table_pull(table_name = "opschedule",
+                               startdate = input$dates[1] %>% as.character(),
+                               enddate = input$dates[2] %>% as.character(),
+                               schema_name = input$EXTEND_ID %>% tolower())
+      
+      dbDisconnect(con) #disconnect
+      
+      
+      #name mapping
+      rename_dict <- c("shBatteryDirectMode" ="SHB_Direct",
+                       "spaceHeatingSetpoint" = "SH_Setpoint",
+                       "therminoStartRechargeSoc" = "HWB Recharge SOC",
+                       "extendElements.maxElecInputKw" = "SHB_max_IN_KW",
+                       "extendElements.minElecInputKw" = "SHB_min_IN_KW",
+                       "heatPumpControl.hpSourceBattery" = "HP_Source_Battery",
+                       "heatPumpControl.hpElectricInputKw" = "HP_IN_KW",
+                       "heatPumpControl.hpThermalOutputKw" ="HP_OUT_KW",
+                       "heatPumpControl.hwBatteryPriority" = "HP_HWB_Priority",
+                       "heatPumpControl.shBatteryPriority" = "HP_SHB_Priority",
+                       "heatPumpControl.spaceHeatingPriority" ="HP_SH_Priority",
+                       "therminoElements.maxElecInputKw" = "HWB_Elec_IN_KW_max",
+                       "therminoElements.minElecInputKw" = "HWB_Elec_IN_KW_min",
+                       "DateTime" = "DateTime",
+                       "space_heating_user_schedule" = "space_heating_user_schedule",
+                       "hot_water_user_schedule" = "hot_water_user_schedule",
+                       "consumption_Schedule" = "consumption_Schedule",
+                       "Agreed_Consumption_schedule" = "Agreed_Consumption_schedule",
+                       "TOU_NoVAT" = "TOU_NoVAT",
+                       "TOU_VAT" = "TOU_VAT" ,
+                       "outside_temperature_forecast" = "outside_temperature_forecast"
+                       )
+      
+      # rename
+      names(result) <- rename_dict[names(result)]
+      result$SHB_Direct <- ifelse(result$SHB_Direct == TRUE,1,0) 
+      
+      galvinizenumeric <- c( "HP_HWB_Priority", "HP_SHB_Priority","HP_SH_Priority")
+      
+      for(i in galvinizenumeric){
+        result[,colnames(result) == i] <-  result[,colnames(result) == i] %>% as.numeric()
+      }
+      
+      #jugaad for correcting the heat schedule decimil place
+      result$space_heating_user_schedule <- as.numeric(result$space_heating_user_schedule) /10
+      
+      stored_opp(result) 
+      print("opp query run, rv should now be 1.5")
+      rv(1.5)
+    }else if(rv() == 1){
+      # #db information:
+      # db <- 'ldess_db'
+      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+      # db_port <- '5432'  # Specify the port (e.g., 5432)
+      # db_user <- 'ldess_hist_dashboard'
+      # db_password <- 'SIE09375SDKJF'
+      # schema_name <- input$EXTEND_ID %>% tolower()
+      # #schema_name <- "ext0006" #FOR TESTING
+      # table_name <- "opschedule"
+      # 
+      # #query information
+      # enddate <- input$dates[2] %>% as.character()
+      # startdate <- input$dates[1] %>% as.character()
+      # #enddate <- as.character(Sys.Date())
+      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+      # 
+      # #connect, define and run query   
+      # con <- dbConnect(RPostgres::Postgres(),
+      #                  dbname = db,
+      #                  host = host_db,
+      #                  port = db_port,
+      #                  user = db_user,
+      #                  password = db_password)
+      # 
+      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
+      # result <- dbGetQuery(con, query)
+      # 
+      # dbDisconnect(con) #disconnect
+      
+      result <- sql_table_pull(table_name = "opschedule",
+                               startdate = input$dates[1] %>% as.character(),
+                               enddate = input$dates[2] %>% as.character(),
+                               schema_name = input$EXTEND_ID %>% tolower())
+      #name mapping
+      rename_dict <- c("shBatteryDirectMode" ="SHB_Direct",
+                       "spaceHeatingSetpoint" = "SH_Setpoint",
+                       "therminoStartRechargeSoc" = "HWB Recharge SOC",
+                       "extendElements.maxElecInputKw" = "SHB_max_IN_KW",
+                       "extendElements.minElecInputKw" = "SHB_min_IN_KW",
+                       "heatPumpControl.hpSourceBattery" = "HP_Source_Battery",
+                       "heatPumpControl.hpElectricInputKw" = "HP_IN_KW",
+                       "heatPumpControl.hpThermalOutputKw" ="HP_OUT_KW",
+                       "heatPumpControl.hwBatteryPriority" = "HP_HWB_Priority",
+                       "heatPumpControl.shBatteryPriority" = "HP_SHB_Priority",
+                       "heatPumpControl.spaceHeatingPriority" ="HP_SH_Priority",
+                       "therminoElements.maxElecInputKw" = "HWB_Elec_IN_KW_max",
+                       "therminoElements.minElecInputKw" = "HWB_Elec_IN_KW_min",
+                       "DateTime" = "DateTime",
+                       "space_heating_user_schedule" = "space_heating_user_schedule",
+                       "hot_water_user_schedule" = "hot_water_user_schedule",
+                       "consumption_Schedule" = "consumption_Schedule",
+                       "Agreed_Consumption_schedule" = "Agreed_Consumption_schedule",
+                       "TOU_NoVAT" = "TOU_NoVAT",
+                       "TOU_VAT" = "TOU_VAT" ,
+                       "outside_temperature_forecast" = "outside_temperature_forecast")
+      
+      # rename
+      names(result) <- rename_dict[names(result)]
+      result$SHB_Direct <- ifelse(result$SHB_Direct == TRUE,1,0) 
+      
+      galvinizenumeric <- c( "HP_HWB_Priority", "HP_SHB_Priority","HP_SH_Priority")
+      
+      for(i in galvinizenumeric){
+        result[,colnames(result) == i] <-  result[,colnames(result) == i] %>% as.numeric()
+      }
+      
+      #jugaad for correcting the heat schedule decimil place
+      result$space_heating_user_schedule <- as.numeric(result$space_heating_user_schedule) /10
+      
+      stored_opp(result) 
+      print("opp query run, rv should now be 0")
+      rv(0)
+    }
+    return(stored_opp())
+    
+  })
+  
+  
+  
+  rv <- reactiveVal(2)
+  stored_data <- reactiveVal()
+  
+  Master_DF <- eventReactive(rv(),{
+    if(rv() == 2){
+      # #db information:
+      # db <- 'ldess_db'
+      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+      # db_port <- '5432'  # Specify the port (e.g., 5432)
+      # db_user <- 'ldess_hist_dashboard'
+      # db_password <- 'SIE09375SDKJF'
+      # schema_name <- input$EXTEND_ID %>% tolower()
+      # #schema_name <- "ext0006" #FOR TESTING
+      # table_name <- "sensor_logs"
+      # 
+      # #query information
+      # enddate <- input$dates[2] %>% as.character()
+      # startdate <- input$dates[1] %>% as.character()
+      # #enddate <- as.character(Sys.Date())
+      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+      # 
+      # #connect, define and run query   
+      # con <- dbConnect(RPostgres::Postgres(),
+      #                  dbname = db,
+      #                  host = host_db,
+      #                  port = db_port,
+      #                  user = db_user,
+      #                  password = db_password)
+      # 
+      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
+      # result <- dbGetQuery(con, query)
+      # 
+      # dbDisconnect(con) #disconnect
+      result <- sql_table_pull(table_name = "sensor_logs",
+                     startdate = input$dates[1] %>% as.character(),
+                     enddate = input$dates[2] %>% as.character(),
+                     schema_name = input$EXTEND_ID %>% tolower())
+      print("master query has run, rv value shoudl be 1")
+      rv(1)
+      stored_data(result)
+      #return(result) 
+    }else if(rv() == 1.5){
+      #db information:
+      # db <- 'ldess_db'
+      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+      # db_port <- '5432'  # Specify the port (e.g., 5432)
+      # db_user <- 'ldess_hist_dashboard'
+      # db_password <- 'SIE09375SDKJF'
+      # schema_name <- input$EXTEND_ID %>% tolower()
+      # #schema_name <- "ext0007" #FOR TESTING
+      # table_name <- "sensor_logs"
+      # 
+      # #query information
+      # enddate <- input$dates[2] %>% as.character()
+      # startdate <- input$dates[1] %>% as.character()
+      # #enddate <- as.character(Sys.Date())
+      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+      # 
+      # #connect, define and run query   
+      # con <- dbConnect(RPostgres::Postgres(),
+      #                  dbname = db,
+      #                  host = host_db,
+      #                  port = db_port,
+      #                  user = db_user,
+      #                  password = db_password)
+      # 
+      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
+      # result <- dbGetQuery(con, query)
+      # 
+      # dbDisconnect(con) #disconnect
+      result <- sql_table_pull(table_name = "sensor_logs",
+                     startdate = input$dates[1] %>% as.character(),
+                     enddate = input$dates[2] %>% as.character(),
+                     schema_name = input$EXTEND_ID %>% tolower())
+      print("master query has run, rv value shoudl be 0")
+      rv(0)
+      stored_data(result)
+      #return(result) 
+    }
+    return(stored_data())
+    # #db information:
+    # db <- 'ldess_db'
+    # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
+    # db_port <- '5432'  # Specify the port (e.g., 5432)
+    # db_user <- 'ldess_hist_dashboard'
+    # db_password <- 'SIE09375SDKJF'
+    # schema_name <- input$EXTEND_ID %>% tolower()
+    # #schema_name <- "ext0007" #FOR TESTING
+    # table_name <- "sensor_logs"
+    # 
+    # #query information
+    # enddate <- input$dates[2] %>% as.character()
+    # startdate <- input$dates[1] %>% as.character()
+    # #enddate <- as.character(Sys.Date())
+    # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
+    # 
+    # #connect, define and run query   
+    # con <- dbConnect(RPostgres::Postgres(),
+    #                  dbname = db,
+    #                  host = host_db,
+    #                  port = db_port,
+    #                  user = db_user,
+    #                  password = db_password)
+    # 
+    # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
+    # result <- dbGetQuery(con, query)
+    # 
+    # dbDisconnect(con) #disconnect
+    # 
+    # return(result) 
+  })
+  
+  observeEvent(input$datapull,{
+    rv(2) 
+    print("button pushed")
     })
   
+
   Master_DF_2_pre <- reactive({  
     DF <- Master_DF()
     CyclesMerge <- input$CyclesMerge
@@ -105,12 +384,53 @@ server <- function(input, output, session){
     #filter out based on these
     DF <- DF[DF$DateTime >= minval & DF$DateTime <= maxval, ]
    
+    #####
+    #pull out data if too much is requested
+    if(input$trimmer_overide == TRUE){
+      DF <- DF[order(DF$DateTime,decreasing = TRUE),]
+      if(difftime(DF$DateTime %>% max(),DF$DateTime %>% min()) <= hours(12)){
+        DF <- DF
+      }else if(difftime(DF$DateTime %>% max(),DF$DateTime %>% min()) <= hours(24)){
+        DF <- DF[-seq(3,nrow(DF), by = 3),]
+      }else if(difftime(DF$DateTime %>% max(),DF$DateTime %>% min()) <= hours(48)){
+        DF <- DF[seq(1,nrow(DF), by = 2),]
+      }else if(difftime(DF$DateTime %>% max(),DF$DateTime %>% min()) <= hours(72)){
+        rows_to_keep <- seq(1, nrow(DF), by = 3)
+        DF <- DF[rows_to_keep, ]
+      }else if(difftime(DF$DateTime %>% max(),DF$DateTime %>% min()) <= hours(100)){
+        rows_to_keep <- seq(1, nrow(DF), by = 5)
+        DF <- DF[rows_to_keep, ]
+      }
+    }
+    return(DF) 
+    
+    
+  })
+  Operating_DF <- reactive({  
+    DF <- Operating_DF_pre()
+    CyclesMerge <- input$CyclesMerge
+    
+    #define actual maximum and minimum values in the data  
+    min <- DF$DateTime %>% min() #corresponds to 0
+    max <- DF$DateTime %>% max() #corressponds to 1
+    #grab the difference
+    diff <- max - min
+    #grab the minimum andmaximum selected inputs and get the distance between those values and 0 and 1 respectivly
+    minselect <- CyclesMerge %>% min()
+    propmingap <- minselect
+    maxselect <- CyclesMerge %>% max()
+    propmaxgap <- 1 - maxselect
+    #calculate from these the actual min and max value
+    minval <- minselect*diff + min
+    maxval <- max - propmaxgap*diff
+    #filter out based on these
+    DF <- DF[DF$DateTime >= minval & DF$DateTime <= maxval, ]
+    
     
     return(DF) 
     
     
   })
-  
   #calculated columns
   Master_DF_2 <- reactive({  
     DF <- Master_DF_2_pre()
@@ -202,6 +522,34 @@ server <- function(input, output, session){
     for(i in current){
       DF[,colnames(DF) %in% i] <- DF[,colnames(DF) %in% i] / 1000
     }
+    #other power columns
+    pwer_cols <- c("PM1_W",
+                   "PM2_PW",
+                   "PM3_PW",
+                   "PM4_PW",
+                   "PM1_PVA",
+                   "PM2_PVA",
+                   "PM3_PVA",
+                   "PM4_PVA",
+                   "PM1_PWH",
+                   "PM2_PWH",
+                   "PM3_PWH",
+                   "PM4_PWH",
+                   "PM1_FR",
+                   "PM2_FR",
+                   "PM3_FR",
+                   "PM4_FR",
+                   "PM1_PF",
+                   "PM2_PF",
+                   "PM3_PF",
+                   "PM4_PF",
+                   "PM1_V",
+                   "PM2_V",
+                   "PM3_V",
+                   "PM4_V")
+    for(i in pwer_cols){
+      DF[,colnames(DF) %in% i] <- ifelse(is.na(as.numeric(DF[,colnames(DF) %in% i])), 0, as.numeric(DF[,colnames(DF) %in% i])/ 10) 
+    }
     #change SOC variables to numeric
     DF$HWB_SOC_pct <- DF$HWB_SOC_pct %>% as.numeric()
     DF$CHB_SOC_pct <- DF$CHB_SOC_pct %>% as.numeric()
@@ -214,7 +562,13 @@ server <- function(input, output, session){
     DF$OP_Mode <-  Mode_mapping$State[match(tolower(DF$Hex_mode), tolower(Mode_mapping$Reading))]
     DF$State_Explination <-  Mode_mapping$Explination[match(tolower(DF$Hex_mode), tolower(Mode_mapping$Reading))]
     
-
+    #clean up zone valve mapping. position value is = x mod 256 and the power value is x/256 rounded down 
+    mv_cols <- c("MV1","MV2")
+    for(i in mv_cols){
+      DF[,colnames(DF) == i] <- mod(DF[,colnames(DF) == i] %>% as.numeric(),256)
+      column_title <- paste0(i,"_return_value")
+      DF[[column_title]] <- DF[,colnames(DF) == i] %>% as.numeric() %>% round(digits = 0)
+    }
     # #LEGACY
     # #clean operating mode
     # Mode_mapping <- read_excel("register_mapping.xlsx",sheet = "Op_mode")
@@ -273,12 +627,27 @@ server <- function(input, output, session){
     specific_heat_PF <- 2.55 # at 20 degrees from file:///C:/Users/griffin.ernest/OneDrive%20-%20Sunamp/BEIS%20-%20Long%20Duration%20Storage/Hydronic%20System/12%20-%20Working%20fluid/coolflow-LVF50-v1.01-tds.pdf
       #can change this when we have better data
   #calculate heat load 
-    DF$SHB_Electrical_Heat_load <- DF$FS5_FS * specific_heat_PF * abs(DF$HS_TS11  - DF$HS_TS10)
-    DF$HP_Brine_Heat_load <- DF$FS6_FS * specific_heat_PF * abs(DF$HP_TS14 - DF$HP_TS15)
-    DF$HP_output_Heat_load <- DF$FS6_FS * specific_heat_PF * abs(DF$HP_TS17 - DF$HP_TS16)
-    DF$SH_toHX_Heat_load <- DF$FS2_FS * specific_heat_PF * abs(DF$HS_TS7 - DF$HS_TS6)
-    DF$SH_fromHX_Heat_load <- DF$FS4_FS * specific_heat_water * abs(DF$HS_TS8 - DF$HS_TS9)
-    DF$HP_toThermino_Heat_load <- DF$FS2_FS * specific_heat_PF * abs(DF$HS_TS3 - DF$HS_TS2)
+    if(LDESS() == 1){
+      DF$SHB_Electrical_Heat_load <- DF$FS5_FS * specific_heat_PF * abs(DF$HS_TS11  - DF$HS_TS10)
+      DF$HP_Brine_Heat_load <- DF$FS6_FS * specific_heat_PF * abs(DF$HP_TS14 - DF$HP_TS15)
+      DF$HP_output_Heat_load <- DF$FS6_FS * specific_heat_PF * abs(DF$HP_TS17 - DF$HP_TS16)
+      DF$SH_toHX_Heat_load <- DF$FS2_FS * specific_heat_PF * abs(DF$HS_TS7 - DF$HS_TS6)
+      DF$SH_fromHX_Heat_load <- DF$FS4_FS * specific_heat_water * abs(DF$HS_TS8 - DF$HS_TS9)
+      DF$HP_toThermino_Heat_load <- DF$FS2_FS * specific_heat_PF * abs(DF$HS_TS3 - DF$HS_TS2)
+    }else if(LDESS() == 2){
+      DF$SHB_Charging_Heat_load <- apply(DF, 1, function(row) Heat_load_calculator(op_mode = row['OP_Mode'], op_mode_string = c("A2","D2A2","D1","D2D1"), flow = row['FS1_FS'],heat1 = row['HS_TS6'],heat2 = row['HS_TS3'],specific_heat = 4.187 ) ) %>% as.numeric()
+      DF$SHB_Discharging_Heat_load <-  apply(DF, 1, function(row) Heat_load_calculator(op_mode = row['OP_Mode'], op_mode_string = c("S1", "D2S1"), flow = row['FS2_FS'],heat1 = row['HS_TS6'],heat2 = row['HS_TS3'],specific_heat = 4.187 ) ) %>% as.numeric()
+      DF$HP_Heat_load <- apply(DF, 1, function(row) Heat_load_calculator(op_mode = row['OP_Mode'], op_mode_string = c("A1", "D2A1", "A3", "D2A3","D2"), flow = row['FS1_FS'],heat1 = row['HS_TS4'],heat2 = row['HS_TS1'],specific_heat = 4.187 ) ) %>% as.numeric()
+      DF$HW_Heat_load <- apply(DF, 1, function(row) Heat_load_calculator(op_mode = row['OP_Mode'], op_mode_string = c("A3", "D2A3"), flow = row['FS2_FS'],heat1 = row['HS_TS3'],heat2 = row['HS_TS2'],specific_heat = 4.187 ) ) %>% as.numeric()
+    }
+    return(DF)
+  })
+  
+  Master_DF_Mergerd <- reactive({
+    DF_main <- Master_DF_2()
+    DF_OP <- Operating_DF()
+    DF <- full_join(DF_main,DF_OP, by = join_by(DateTime == DateTime))
+    DF <- DF[order(DF$DateTime,decreasing = TRUE),]
     return(DF)
   })
   
@@ -303,14 +672,21 @@ server <- function(input, output, session){
   #####
   #TABLE
   #####
-  output$OP_mode_table <- renderDataTable({
+  output$OP_mode_table <- DT::renderDT({
     DF <- Master_DF_2()
-    
-    temp <- DF[,colnames(DF) %in% c("DateTime","OP_Mode","State_Explination","DV1","DV2","DV3" ,"DV4","DV5","DV6","DV7","DV8", "MV1","MV2", "MV3")]
+    if(LDESS() == 1){
+      colreq <- c("DateTime","OP_Mode","State_Explination","DV1","DV2","DV3" ,"DV4","DV5","DV6","DV7","DV8","FS1_FS","FS2_FS","FS3_FS","FS4_FS", "FS5_FS", "FS6_FS")
+    }else if(LDESS() == 2){
+      colreq <- c("DateTime","OP_Mode","State_Explination","ZV",	"MV1",	"MV2", "FS1_FS","FS2_FS")
+    }
+    temp <- DF[,colnames(DF) %in% colreq]
+   # temp <- DF[,colnames(DF) %in% c("DateTime","OP_Mode","State_Explination","DV1","DV2","DV3" ,"DV4","DV5","DV6","DV7","DV8", "MV1","MV2", "MV3")]
     temp <- temp[order(temp$DateTime,decreasing = TRUE),]
     temp$DateTime <- as.POSIXct(temp$DateTime) %>% as.character()
     return(temp)
-  })
+  },options = list(
+    lengthMenu = list(c(10,25, 50, -1), c('25','50','100','All')),
+    pageLength = 50))
   
   #####
   #Plots  
@@ -323,7 +699,12 @@ server <- function(input, output, session){
     reqCols <- c("DateTime")
     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
     # thesecolumns <- append(reqCols,IN)
-    wantedCols <- c("SHB_Electrical_Heat_load", "HP_Brine_Heat_load", "HP_output_Heat_load", "SH_toHX_Heat_load", "SH_fromHX_Heat_load", "HP_toThermino_Heat_load" )
+    wantedCols <- c("SHB_Electrical_Heat_load", "HP_Brine_Heat_load", "HP_output_Heat_load", "SH_toHX_Heat_load", "SH_fromHX_Heat_load", "HP_toThermino_Heat_load",
+                    "SHB_Charging_Heat_load",
+                    "SHB_Discharging_Heat_load",
+                    "HP_Heat_load",
+                    "HW_Heat_load")
+    
     thesecolumns <- append(reqCols,wantedCols)
     
     # fill empty time index
@@ -338,14 +719,19 @@ server <- function(input, output, session){
     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
     fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "value"],  name = "SHB_Electrical_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "value"], name = "HP_Brine_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HP_output_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_output_Heat_load",colnames(data) == "value"], name = "HP_output_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "value"], name = "SH_toHX_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "value"], name = "SH_fromHX_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "value"], name = "HP_toThermino_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
-    
-    
+    if(LDESS() == 1){
+      fig <- fig %>% add_trace(x = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SHB_Electrical_Heat_load",colnames(data) == "value"],  name = "SHB_Electrical_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_Brine_Heat_load",colnames(data) == "value"], name = "HP_Brine_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HP_output_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_output_Heat_load",colnames(data) == "value"], name = "HP_output_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SH_toHX_Heat_load",colnames(data) == "value"], name = "SH_toHX_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SH_fromHX_Heat_load",colnames(data) == "value"], name = "SH_fromHX_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_toThermino_Heat_load",colnames(data) == "value"], name = "HP_toThermino_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+    }else if(LDESS() == 2){
+      fig <- fig %>% add_trace(x = data[data$variable == "SHB_Charging_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SHB_Charging_Heat_load",colnames(data) == "value"], name = "SHB_Charging_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "SHB_Discharging_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "SHB_Discharging_Heat_load",colnames(data) == "value"], name = "SHB_Discharging_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HP_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HP_Heat_load",colnames(data) == "value"], name = "HP_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HW_Heat_load",colnames(data) == "DateTime"], y = data[data$variable == "HW_Heat_load",colnames(data) == "value"], name = "HW_Heat_load", mode = "lines+markers", type = "scatter")   # Add traces
+    }
     
     
     # Set figure title, x and y-axes titles
@@ -492,9 +878,9 @@ server <- function(input, output, session){
     if(any(wantedCols %in% c("HWB_TSB","HWB_TSM","HWB_TST"))){
       if(wantedCols %in% c("HWB_SOC_pct") %>% any){ #two axis plot
         fig <- plot_ly()
-        fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+        fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "lines+markers", type = "scatter") %>% layout(yaxis2 = list(range = c(0,125)))   # Add traces
         if(wantedCols %in% c("HWB_TSB")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "lines+markers", type = "scatter") %>% layout(yaxis = list(range = c(0,105)))
         }
         if(wantedCols %in% c("HWB_TST")  %>% any()){
           fig <- fig %>% add_trace(x = data[data$variable == "HWB_TST",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TST",colnames(data) == "value"], name = "TST", mode = "lines+markers", type = "scatter")
@@ -536,7 +922,7 @@ server <- function(input, output, session){
       }else{ #just one axis(TS)
         fig <- plot_ly()
         if(wantedCols %in% c("HWB_TSB")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "HWB_TSB",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TSB",colnames(data) == "value"], name = "TSB", mode = "lines+markers", type = "scatter") %>% layout(yaxis = list(range = c(0,105)))
         }
         if(wantedCols %in% c("HWB_TST")  %>% any()){
           fig <- fig %>% add_trace(x = data[data$variable == "HWB_TST",colnames(data) == "DateTime"], y = data[data$variable == "HWB_TST",colnames(data) == "value"], name = "TST", mode = "lines+markers", type = "scatter")
@@ -569,7 +955,7 @@ server <- function(input, output, session){
       }
     }else if(wantedCols %in% c("HWB_SOC_pct")){ #just one axis (SOC)
       fig <- plot_ly()
-      fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "HWB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "HWB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "lines+markers", type = "scatter")   %>% layout(yaxis = list(range = c(0,125)))# Add traces
       
       
       
@@ -598,108 +984,108 @@ server <- function(input, output, session){
   })
   
   #'without choise
-  output$HWB_bottom <- renderPlotly({
-      DF <- Master_DF_plots()
-      # plottemp <- temp
-      reqCols <- c("DateTime")
-      # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
-      # thesecolumns <- append(reqCols,IN)
-     wantedCols <- c("FS3_FS","HS_TS4","HS_TS5")
-      thesecolumns <- append(reqCols,wantedCols)
-
-      DF <- DF[,colnames(DF) %in% thesecolumns]
-      data <- reshape2::melt(DF,id.var = c("DateTime"))
-      #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
-      #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
-
-          fig <- plot_ly()
-          fig <- fig %>% add_trace(x = data[data$variable == "FS3_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS3_FS",colnames(data) == "value"],yaxis = "y2", name = "FS3", mode = "lines+markers", type = "scatter")   # Add traces
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "HS_TS4", mode = "lines+markers", type = "scatter")
-          fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "HS_TS5", mode = "lines+markers", type = "scatter")
-          
-
-
-          ay <- list(
-            tickfont = list(color = "red"),
-            overlaying = "y",
-            side = "right",
-            title = "<b>Flow</b> Thermino")
-
-
-
-          # Set figure title, x and y-axes titles
-          fig <- fig %>% layout(
-            title = list(text = "<b>Thermino Hydronics: hot water draw<b>", x=.2, y=1.1),
-            margin = list(l = 30, r = 50, b = 10, t = 40),
-            yaxis2 = ay,
-            xaxis = list(title="Datetime"),
-            yaxis = list(title="<b>Temperature</b> Thermino Hydronics")
-          )%>%
-            layout(plot_bgcolor='#e5ecf6',
-                   legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
-                   xaxis = list(
-                     zerolinecolor = '#ffff',
-                     zerolinewidth = 2,
-                     gridcolor = 'ffff'),
-                   yaxis = list(
-                     zerolinecolor = '#ffff',
-                     zerolinewidth = 2,
-                     gridcolor = 'ffff'))
-
-
-          return(fig)
-        })
-  
- 
-  output$HWB_bottomid <- renderPlotly({
-    DF <- Master_DF_plots()
-    # plottemp <- temp
-    reqCols <- c("DateTime")
-    # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
-    # thesecolumns <- append(reqCols,IN)
-    wantedCols <- c("FS2_FS","HS_TS2","HS_TS3")
-    thesecolumns <- append(reqCols,wantedCols)
-    
-    DF <- DF[,colnames(DF) %in% thesecolumns]
-    data <- reshape2::melt(DF,id.var = c("DateTime"))
-    #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
-    #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
-    fig <- plot_ly()
-    fig <- fig %>% add_trace(x = data[data$variable == "FS2_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS2_FS",colnames(data) == "value"],yaxis = "y2", name = "FS2", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HS_TS2",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS2",colnames(data) == "value"], name = "HS_TS2", mode = "lines+markers", type = "scatter")   # Add traces
-    fig <- fig %>% add_trace(x = data[data$variable == "HS_TS3",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS3",colnames(data) == "value"], name = "HS_TS3", mode = "lines+markers", type = "scatter")   # Add traces
-  
-    ay <- list(
-      tickfont = list(color = "red"),
-      overlaying = "y",
-      side = "right",
-      title = "<b>Flow</b> Thermino")
-    
-    
-    
-    # Set figure title, x and y-axes titles
-    fig <- fig %>% layout(
-      title = list(text = "<b>Thermino Hydronics: hot water charge<b>", x=.2, y=1.1), 
-      margin = list(l = 30, r = 50, b = 10, t = 40),
-      yaxis2 = ay,
-      xaxis = list(title="Datetime"),
-      yaxis = list(title="<b>Temperature</b> Thermino Hydronics")
-    )%>%
-      layout(plot_bgcolor='#e5ecf6',
-             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
-             xaxis = list(
-               zerolinecolor = '#ffff',
-               zerolinewidth = 2,
-               gridcolor = 'ffff'),
-             yaxis = list(
-               zerolinecolor = '#ffff',
-               zerolinewidth = 2,
-               gridcolor = 'ffff'))
-    
-    
-    return(fig)
-    
-  })
+  # output$HWB_bottom <- renderPlotly({
+  #     DF <- Master_DF_plots()
+  #     # plottemp <- temp
+  #     reqCols <- c("DateTime")
+  #     # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
+  #     # thesecolumns <- append(reqCols,IN)
+  #    wantedCols <- c("FS3_FS","HS_TS4","HS_TS5")
+  #     thesecolumns <- append(reqCols,wantedCols)
+  # 
+  #     DF <- DF[,colnames(DF) %in% thesecolumns]
+  #     data <- reshape2::melt(DF,id.var = c("DateTime"))
+  #     #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
+  #     #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
+  # 
+  #         fig <- plot_ly()
+  #         fig <- fig %>% add_trace(x = data[data$variable == "FS3_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS3_FS",colnames(data) == "value"],yaxis = "y2", name = "FS3", mode = "lines+markers", type = "scatter")   # Add traces
+  #         fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "HS_TS4", mode = "lines+markers", type = "scatter")
+  #         fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "HS_TS5", mode = "lines+markers", type = "scatter")
+  #         
+  # 
+  # 
+  #         ay <- list(
+  #           tickfont = list(color = "red"),
+  #           overlaying = "y",
+  #           side = "right",
+  #           title = "<b>Flow</b> Thermino")
+  # 
+  # 
+  # 
+  #         # Set figure title, x and y-axes titles
+  #         fig <- fig %>% layout(
+  #           title = list(text = "<b>Thermino Hydronics: hot water draw<b>", x=.2, y=1.1),
+  #           margin = list(l = 30, r = 50, b = 10, t = 40),
+  #           yaxis2 = ay,
+  #           xaxis = list(title="Datetime"),
+  #           yaxis = list(title="<b>Temperature</b> Thermino Hydronics")
+  #         )%>%
+  #           layout(plot_bgcolor='#e5ecf6',
+  #                  legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+  #                  xaxis = list(
+  #                    zerolinecolor = '#ffff',
+  #                    zerolinewidth = 2,
+  #                    gridcolor = 'ffff'),
+  #                  yaxis = list(
+  #                    zerolinecolor = '#ffff',
+  #                    zerolinewidth = 2,
+  #                    gridcolor = 'ffff'))
+  # 
+  # 
+  #         return(fig)
+  #       })
+  # 
+  # 
+  # output$HWB_bottomid <- renderPlotly({
+  #   DF <- Master_DF_plots()
+  #   # plottemp <- temp
+  #   reqCols <- c("DateTime")
+  #   # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
+  #   # thesecolumns <- append(reqCols,IN)
+  #   wantedCols <- c("FS2_FS","HS_TS2","HS_TS3")
+  #   thesecolumns <- append(reqCols,wantedCols)
+  #   
+  #   DF <- DF[,colnames(DF) %in% thesecolumns]
+  #   data <- reshape2::melt(DF,id.var = c("DateTime"))
+  #   #data$temp <- ifelse(data$variable %in% c("HWB_TSB","HWB_TSM","HWB_TST"), data$value, NA) %>% as.numeric()
+  #   #data$soc <- ifelse(data$variable %in% c("HWB_SOC_pct"), data$value,NA) %>% as.numeric()
+  #   fig <- plot_ly()
+  #   fig <- fig %>% add_trace(x = data[data$variable == "FS2_FS",colnames(data) == "DateTime"], y = data[data$variable == "FS2_FS",colnames(data) == "value"],yaxis = "y2", name = "FS2", mode = "lines+markers", type = "scatter")   # Add traces
+  #   fig <- fig %>% add_trace(x = data[data$variable == "HS_TS2",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS2",colnames(data) == "value"], name = "HS_TS2", mode = "lines+markers", type = "scatter")   # Add traces
+  #   fig <- fig %>% add_trace(x = data[data$variable == "HS_TS3",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS3",colnames(data) == "value"], name = "HS_TS3", mode = "lines+markers", type = "scatter")   # Add traces
+  # 
+  #   ay <- list(
+  #     tickfont = list(color = "red"),
+  #     overlaying = "y",
+  #     side = "right",
+  #     title = "<b>Flow</b> Thermino")
+  #   
+  #   
+  #   
+  #   # Set figure title, x and y-axes titles
+  #   fig <- fig %>% layout(
+  #     title = list(text = "<b>Thermino Hydronics: hot water charge<b>", x=.2, y=1.1), 
+  #     margin = list(l = 30, r = 50, b = 10, t = 40),
+  #     yaxis2 = ay,
+  #     xaxis = list(title="Datetime"),
+  #     yaxis = list(title="<b>Temperature</b> Thermino Hydronics")
+  #   )%>%
+  #     layout(plot_bgcolor='#e5ecf6',
+  #            legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+  #            xaxis = list(
+  #              zerolinecolor = '#ffff',
+  #              zerolinewidth = 2,
+  #              gridcolor = 'ffff'),
+  #            yaxis = list(
+  #              zerolinecolor = '#ffff',
+  #              zerolinewidth = 2,
+  #              gridcolor = 'ffff'))
+  #   
+  #   
+  #   return(fig)
+  #   
+  # })
   output$HWB_bottomer <- renderPlotly({
     DF <- Master_DF_plots()
     # plottemp <- temp
@@ -781,9 +1167,9 @@ server <- function(input, output, session){
     if(any(wantedCols %in% c("CHB_TS1_AVG","CHB_TS2_AVG","CHB_TS3_AVG","CHB_TS4_AVG","CHB_TS5_AVG"))){
       if(wantedCols %in% c("CHB_SOC_pct") %>% any){ #two axis plot
         fig <- plot_ly()
-        fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+        fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"],yaxis = "y2", name = "SOC", mode = "lines+markers", type = "scatter") %>% layout(yaxis2 = list(range = c(0,125)))  # Add traces
         if(wantedCols %in% c("CHB_TS1_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "lines+markers", type = "scatter") %>% layout(yaxis = list(range = c(0,105)))
         }
         if(wantedCols %in% c("CHB_TS2_AVG")  %>% any()){
           fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS2_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS2_AVG",colnames(data) == "value"], name = "CHB_TS2_AVG", mode = "lines+markers", type = "scatter")
@@ -831,7 +1217,7 @@ server <- function(input, output, session){
       }else{ #just one axis(TS)
         fig <- plot_ly()
         if(wantedCols %in% c("CHB_TS1_AVG")  %>% any()){
-          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "lines+markers", type = "scatter")
+          fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS1_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS1_AVG",colnames(data) == "value"], name = "CHB_TS1_AVG", mode = "lines+markers", type = "scatter") %>% layout(yaxis = list(range = c(0,105)))
         }
         if(wantedCols %in% c("CHB_TS2_AVG")  %>% any()){
           fig <- fig %>% add_trace(x = data[data$variable == "CHB_TS2_AVG",colnames(data) == "DateTime"], y = data[data$variable == "CHB_TS2_AVG",colnames(data) == "value"], name = "CHB_TS2_AVG", mode = "lines+markers", type = "scatter")
@@ -869,7 +1255,7 @@ server <- function(input, output, session){
       }
     }else if(wantedCols %in% c("CHB_SOC_pct")){ #just one axis (SOC)
       fig <- plot_ly()
-      fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "lines+markers", type = "scatter")   # Add traces
+      fig <- fig %>% add_trace(x = data[data$variable == "CHB_SOC_pct",colnames(data) == "DateTime"], y = data[data$variable == "CHB_SOC_pct",colnames(data) == "value"], name = "SOC", mode = "lines+markers", type = "scatter")  %>% layout(yaxis = list(range = c(0,125))) # Add traces
       
       
       
@@ -1136,8 +1522,584 @@ server <- function(input, output, session){
     
 
   })
+  #####
+  #Schedule plots
+  #####
+  output$OP_Schedule_plot <- renderPlotly({
+    #response data from maintenence log
+    DF <- Operating_DF()
+    
+    y1 <- c(
+        "HP_SH_Priority",
+        "HP_SHB_Priority",
+        "HP_HWB_Priority",
+        "HP_Source_Battery",
+        "SHB_Direct"
+      
+    )
+    
+    # y2 <-c("SH_Setpoint"
+    # )
+    # reqcol <- append(y1,y2)
+    
+    # DF <- DF[order(DF$DateTime),]
+    DF <- DF[,colnames(DF) %in% append(y1,"DateTime")]
+    
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    #two axis plot
+    
+    fig <- plot_ly()
+    for(i in y1){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "markers", type = "scatter")   # Add traces
+    }
+    # for(i in y2){
+    #   fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis = "y2", name = i, mode = "lines", type = "scatter")   # Add traces
+    # }
+    
+    # ay <- list(
+    #   tickfont = list(color = "red"),
+    #   overlaying = "y",
+    #   side = "right",
+    #   title = "SOC")
+    # 
+    # 
+    
+    # Set figure title, x and y-axes titles
+    fig <- fig %>% layout(
+      title = list(text = "<b>Operating Schedule<b> Heat Pump and Space Heating", x=.01, y=1.4),
+      margin = list(l = 30, r = 50, b = 10, t = 40),
+      xaxis = list(title="DateTime"),
+      # yaxis2 = ay,
+      yaxis = list(title="<b>Priority</b>",tickvals = c(1:3), range =c(.5,3.5))
+    )%>%
+      layout(plot_bgcolor='#e5ecf6',
+             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+             xaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'),
+             yaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'))
+    
+    
+    return(fig)
+    
+    
+  })
   
   
+  
+  output$OP_Schedule_plot2 <- renderPlotly({
+    DF <-  Operating_DF()
+    
+    y1 <-c("HWB_Elec_IN_KW_min",
+           "HWB_Elec_IN_KW_max",
+           "HP_OUT_KW",
+           "HP_IN_KW",
+           "SHB_min_IN_KW",
+           "SHB_max_IN_KW"
+    )
+    
+    #y2 <- c("HWB Recharge SOC")
+    #reqcol <- append(y1,y2)
+    
+    DF <- DF[order(DF$DateTime),]
+    DF <- DF[,colnames(DF) %in% append(y1,"DateTime")]
+
+    
+    
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    #two axis plot
+    
+    fig <- plot_ly()
+    for(i in y1){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")   # Add traces
+    }
+    # for(i in y2){
+    #   fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis = "y2", name = i, mode = "lines+markers", type = "scatter")   # Add traces
+    # }
+    # ay <- list(
+    #   tickfont = list(color = "red"),
+    #   overlaying = "y",
+    #   side = "right",
+    #   title = "SOC")
+    # Set figure title, x and y-axes titles
+    fig <- fig %>% layout(
+      title = list(text = "<b>Operating Schedule<b> SHB and HWB", x=.01, y=1.1),
+      margin = list(l = 30, r = 50, b = 10, t = 40),
+      xaxis = list(title="DateTime"),
+      # yaxis2 = ay,
+      yaxis = list(title="<b>Power</b> kW")
+    )%>%
+      layout(plot_bgcolor='#e5ecf6',
+             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+             xaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'),
+             yaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'))
+    
+    
+    return(fig)
+    
+    
+  })
+  
+  output$OP_Schedule_plot3 <- renderPlotly({ 
+    DF <-  Operating_DF()
+  
+  
+  
+  y1 <-c("consumption_Schedule",
+          "Agreed_Consumption_schedule"
+         # "hot_water_user_schedule" ,
+         # "space_heating_user_schedule"
+         )
+  
+  # y2 <- c("HWB Recharge SOC")
+  # reqcol <- append(y1,y2)
+  
+  DF <- DF[order(DF$DateTime),]
+  
+  
+  
+  
+  data <- reshape2::melt(DF,id.var = c("DateTime"))
+  #two axis plot
+  
+  fig <- plot_ly()
+  for(i in y1){
+    fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")   # Add traces
+  }
+  # for(i in y2){
+  #   fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis = "y2", name = i, mode = "lines+markers", type = "scatter")   # Add traces
+  # }
+  # ay <- list(
+  #   tickfont = list(color = "red"),
+  #   overlaying = "y",
+  #   side = "right",
+  #   title = "SOC")
+  # Set figure title, x and y-axes titles
+  fig <- fig %>% layout(
+    title = list(text = "<b>Operating Schedule<b> SHB and HWB", x=.01, y=1.1),
+    margin = list(l = 30, r = 50, b = 10, t = 40),
+    xaxis = list(title="DateTime"),
+    # yaxis2 = ay,
+    yaxis = list(title="<b>Power</b> kW")
+  )%>%
+    layout(plot_bgcolor='#e5ecf6',
+           legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+           xaxis = list(
+             zerolinecolor = '#ffff',
+             zerolinewidth = 2,
+             gridcolor = 'ffff'),
+           yaxis = list(
+             zerolinecolor = '#ffff',
+             zerolinewidth = 2,
+             gridcolor = 'ffff'))
+  
+  
+  return(fig)
+  
+    
+  })
+  output$OP_Schedule_plot4 <- renderPlotly({ 
+    DF <-  Operating_DF()
+    
+    
+    
+    y1 <-c(#"consumption_Schedule",
+           #"Agreed_Consumption_schedule",
+           "SH_Setpoint",
+           "hot_water_user_schedule" ,
+           "space_heating_user_schedule"
+           
+    )
+    
+    y2 <- c("HWB Recharge SOC")
+    reqcol <- append(y1,y2)
+    DF <- DF[,colnames(DF) %in% append("DateTime",reqcol)]
+    DF <- DF[order(DF$DateTime),]
+    
+    
+    DF$hot_water_user_schedule <- DF$hot_water_user_schedule * 10
+    
+    
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    #two axis plot
+    
+    fig <- plot_ly()
+    for(i in y1){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")   # Add traces
+    }
+    for(i in y2){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis = "y2", name = i, mode = "lines+markers", type = "scatter")   # Add traces
+    }
+    ay <- list(
+      tickfont = list(color = "red"),
+      overlaying = "y",
+      side = "right",
+      title = "SOC")
+    #Set figure title, x and y-axes titles
+    fig <- fig %>% layout(
+      title = list(text = "<b>Heating Schedule<b> Hot water and Space Heating", x=.01, y=1.1),
+      margin = list(l = 30, r = 50, b = 10, t = 40),
+      xaxis = list(title="DateTime"),
+      yaxis2 = ay,
+      yaxis = list(title="<b>Power</b> kW")
+    )%>%
+      layout(plot_bgcolor='#e5ecf6',
+             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+             xaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'),
+             yaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'))
+    
+    
+    return(fig)
+    
+    
+  })
+  output$OP_Schedule_plot5 <- renderPlotly({ 
+    DF <-  Operating_DF()
+    
+    
+    
+    y1 <-c("TOU_VAT","TOU_NoVAT")
+    
+    y2 <- c("outside_temperature_forecast")
+    reqcol <- append(y1,y2)
+    DF <- DF[,colnames(DF) %in% append("DateTime",reqcol)]
+    DF <- DF[order(DF$DateTime),]
+    
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    #two axis plot
+    
+    fig <- plot_ly()
+    for(i in y1){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")   # Add traces
+    }
+    for(i in y2){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis = "y2", name = i, mode = "lines+markers", type = "scatter")   # Add traces
+    }
+    ay <- list(
+      tickfont = list(color = "red"),
+      overlaying = "y",
+      side = "right",
+      title = "Temperature ")
+    #Set figure title, x and y-axes titles
+    fig <- fig %>% layout(
+      title = list(text = "<b>Heating Schedule<b> Hot water and Space Heating", x=.01, y=1.1),
+      margin = list(l = 30, r = 50, b = 10, t = 40),
+      xaxis = list(title="DateTime"),
+      yaxis2 = ay,
+      yaxis = list(title="<b>TOU</b>")
+    )%>%
+      layout(plot_bgcolor='#e5ecf6',
+             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+             xaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'),
+             yaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'))
+    
+    
+    return(fig)
+    
+    
+  })
+  #######
+  #Hydronics plot
+  #######
+  output$valveplot <- renderPlotly({
+    DF <- Master_DF_plots()
+    
+    DF <- DF[,colnames(DF) %in% c("DateTime","ZV","MV1","MV2")]
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    
+    
+    fig <- plot_ly()
+    
+    fig <- plot_ly()
+    fig <- fig %>% add_trace(x = data[data$variable == "ZV",colnames(data) == "DateTime"], y = data[data$variable == "ZV",colnames(data) == "value"], yaxis= "y2", name = "ZV", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "MV1",colnames(data) == "DateTime"], y = data[data$variable == "MV1",colnames(data) == "value"], name = "MV1", mode = "markers", type = "scatter")   # Add traces
+    fig <- fig %>% add_trace(x = data[data$variable == "MV2",colnames(data) == "DateTime"], y = data[data$variable == "MV2",colnames(data) == "value"], name = "MV2", mode = "markers", type = "scatter")   # Add traces
+    
+    # Set figure title, x and y-axes titles
+    
+    ay <- list(
+      tickfont = list(color = "red"),
+      type = "linear",
+      overlaying = "y",
+      side = "right",
+      title = "<b>Zone Valve Status")
+    
+    fig <- fig %>% layout(
+      title = list(text = "<b>MV and ZV reading<b>", x=.2, y=1.1), 
+      margin = list(l = 30, r = 50, b = 10, t = 40),
+      yaxis2 = ay,
+      xaxis = list(title="DateTime"),
+      yaxis = list(title="<b>MV Status</b> ")
+    )%>%
+      layout(plot_bgcolor='#e5ecf6',
+             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+             xaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'),
+             yaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'))
+    
+    
+    return(fig)
+  })
+  
+  output$Hydronicsplot <- renderPlotly({
+    imputs <- input$Hydronics_im
+    temper_inputs <- imputs[imputs %in% c("HP_TS16",	
+                                          "HP_TS17",	
+                                          "HP_TS18", 
+                                          "ROOM_TS19",
+                                          "HS_TS1",
+                                          "HS_TS2",	
+                                          "HS_TS3",	
+                                          "HS_TS4"	,
+                                          "HS_TS5"	,
+                                          "HS_TS6"	,
+                                          "HS_TS7")]
+    other_inputs <- imputs[imputs %in% c("FS1_FS"	,"FS2_FS","PUMP_1")]
+    
+    DF <- Master_DF_plots()
+    # plottemp <- temp
+    reqCols <- c("DateTime")
+    # IN <- c("delta_Immersion_Heater_Energy_Consumed", "Hot_Water_Flow_Temperature")
+    # thesecolumns <- append(reqCols,IN)
+    wantedCols <- c(imputs)
+    
+    thesecolumns <- append(reqCols,wantedCols)
+    
+    DF <- DF[,colnames(DF) %in% thesecolumns]
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    
+    
+    fig <- plot_ly()
+    if(length(other_inputs)>=1){
+      for(i in other_inputs){
+        fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis= "y2", name = i, mode = "lines+markers", type = "scatter")
+      }
+      if(length(temper_inputs) >=1){
+        for(i in temper_inputs){
+          fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")
+        }
+      }else{ #just put someting on the LHS axis
+        fig <- fig %>% add_trace(x = data[data$variable == "ROOM_TS19",colnames(data) == "DateTime"], y = data[data$variable == "ROOM_TS19",colnames(data) == "value"], name = "ROOM_TS19", mode = "lines+markers", type = "scatter")
+      }
+      ay <- list(
+        tickfont = list(color = "red"),
+        type = "linear",
+        overlaying = "y",
+        side = "right",
+        title = "<b>Flow Sensor</b>reading")
+      
+      # Set figure title, x and y-axes titles
+      fig <- fig %>% layout(
+        title = list(text = "<b>Hydronics TS<b>", x=.2, y=1.1), 
+        margin = list(l = 30, r = 50, b = 10, t = 40),
+        yaxis2 = ay,
+        xaxis = list(title="DateTime"),
+        yaxis = list(title="<b>Temperature</b> ")
+      )%>%
+        layout(plot_bgcolor='#e5ecf6',
+               legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+               xaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'),
+               yaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'))
+      
+    }else{
+      for(i in temper_inputs){
+        fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")
+      }
+      # Set figure title, x and y-axes titles
+      fig <- fig %>% layout(
+        title = list(text = "<b>Hydronics_TS<b>", x=.2, y=1.1), 
+        margin = list(l = 30, r = 50, b = 10, t = 40),
+        #yaxis2 = ay,
+        xaxis = list(title="DateTime"),
+        yaxis = list(title="<b>Temperature</b> ")
+      )%>%
+        layout(plot_bgcolor='#e5ecf6',
+               legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+               xaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'),
+               yaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'))
+    }
+    
+    
+    
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS1",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS1",colnames(data) == "value"], name = "TS1", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS2",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS2",colnames(data) == "value"], name = "TS2", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS3",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS3",colnames(data) == "value"], name = "TS3", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS4",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS4",colnames(data) == "value"], name = "TS4", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS5",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS5",colnames(data) == "value"], name = "TS5", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS6",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS6",colnames(data) == "value"], name = "TS6", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "HS_TS7",colnames(data) == "DateTime"], y = data[data$variable == "HS_TS7",colnames(data) == "value"], name = "TS7", mode = "lines+markers", type = "scatter")   # Add traces
+    # fig <- fig %>% add_trace(x = data[data$variable == "ROOM_TS19",colnames(data) == "DateTime"], y = data[data$variable == "ROOM_TS19",colnames(data) == "value"], name = "ROOM_TS19", mode = "lines+markers", type = "scatter")   # Add traces
+    # 
+    # # Set figure title, x and y-axes titles
+    # fig <- fig %>% layout(
+    #   title = list(text = "<b>Hydronics_TS<b>", x=.2, y=1.1), 
+    #   margin = list(l = 30, r = 50, b = 10, t = 40),
+    #   #yaxis2 = ay,
+    #   xaxis = list(title="DateTime"),
+    #   yaxis = list(title="<b>Temperature</b> ")
+    # )%>%
+    #   layout(plot_bgcolor='#e5ecf6',
+    #          legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+    #          xaxis = list(
+    #            zerolinecolor = '#ffff',
+    #            zerolinewidth = 2,
+    #            gridcolor = 'ffff'),
+    #          yaxis = list(
+    #            zerolinecolor = '#ffff',
+    #            zerolinewidth = 2,
+    #            gridcolor = 'ffff'))
+    
+    
+    return(fig)
+  })
+  
+  output$OPM_Plot <- renderPlotly({
+    DF <- Master_DF_plots()
+    
+    DF <- DF[,colnames(DF) %in% c("DateTime","OP_Mode")]
+    fig <- plot_ly()
+    fig <- fig %>% add_trace(x = DF$DateTime, y = DF$OP_Mode, name = "OP Mode", mode = "markers", type = "scatter")
+    fig <- fig %>% layout(
+      title = list(text = "<b>OPM<b>", x=.2, y=1.1), 
+      margin = list(l = 30, r = 50, b = 10, t = 40)
+    )%>%
+      layout(plot_bgcolor='#e5ecf6',
+             legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+             xaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'),
+             yaxis = list(
+               zerolinecolor = '#ffff',
+               zerolinewidth = 2,
+               gridcolor = 'ffff'))
+    # plot_ly(DF, x = ~DateTime, y = ~OP_Mode, type = 'scatter', mode = 'markers',
+    #         marker = list(color = ~OP_Mode),)
+    return(fig)
+  })
+  
+  #######
+  #Master Plot
+  ########
+   observeEvent(input$plotButton, {
+     output$Master_Plot <- renderPlotly({
+   
+      
+    DF <- Master_DF_Mergerd()
+    y1vars <- isolate(input$Master_Y1_LDESS_2)
+    y1multvars <- input$Master_Y1_mult_LDESS_2 %>% isolate()
+    y2vars <- input$Master_Y2_LDESS_2 %>% isolate()
+    multiplier <- input$MasterMultiplier %>% as.numeric() %>% isolate()
+    reqcols <- append(y1vars,y1multvars)    
+    reqcols <- append(reqcols, y2vars)
+    reqcols <- append(reqcols,"DateTime")
+    DF <- DF[,colnames(DF) %in% unique(reqcols)]
+    data <- reshape2::melt(DF,id.var = c("DateTime"))
+    
+    
+    fig <- plot_ly()
+    for(i in y1vars){
+      fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], name = i, mode = "lines+markers", type = "scatter")
+    }
+    if(length(y1multvars) >= 1){
+      for(i in y1multvars){
+        fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"] * multiplier, name = i, mode = "lines+markers", type = "scatter")
+      }
+    }
+    if(length(y2vars) >=1){
+      for(i in y2vars){
+        fig <- fig %>% add_trace(x = data[data$variable == i,colnames(data) == "DateTime"], y = data[data$variable == i,colnames(data) == "value"], yaxis = "y2", name = i, mode = "lines+markers", type = "scatter")
+      }
+      ay <- list(
+        tickfont = list(color = "red"),
+        type = "linear",
+        overlaying = "y",
+        side = "right",
+        title = "<b>Y2<b>")
+      
+      fig <- fig %>% layout(
+        title = list(text = "<b>Plot<b>", x=.2, y=1.1), 
+        margin = list(l = 30, r = 50, b = 10, t = 40),
+        yaxis2 = ay,
+        xaxis = list(title="DateTime"),
+        yaxis = list(title="<b>Y1</b> ")
+      )%>%
+        layout(plot_bgcolor='#e5ecf6',
+               legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+               xaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'),
+               yaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'))
+      
+    }else{
+      fig <- fig %>% layout(
+        title = list(text = "<b>Plot<b>", x=.2, y=1.1), 
+        margin = list(l = 30, r = 50, b = 10, t = 40),
+        #yaxis2 = ay,
+        xaxis = list(title="DateTime"),
+        yaxis = list(title="<b>Y1</b> ")
+      )%>%
+        layout(plot_bgcolor='#e5ecf6',
+               legend = list(orientation = "h", xanchor = "center", x = 0.7, y = 1.1),
+               xaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'),
+               yaxis = list(
+                 zerolinecolor = '#ffff',
+                 zerolinewidth = 2,
+                 gridcolor = 'ffff'))
+    }
+    
+    
+    
+    
+    return(fig)
+    })
+  })
   #####
   #Output file
   #####
@@ -1151,7 +2113,7 @@ server <- function(input, output, session){
         #create worksheet for CSV
         addWorksheet(wb=object, sheetName = "data")
         #write Raw data to page
-        writeData(object, sheet ="data", x = Master_DF_2() )
+        writeData(object, sheet ="data", x = Master_DF_Mergerd() )
         
         #save workbook
       saveWorkbook(object, file =  file, overwrite = TRUE)
