@@ -1,28 +1,24 @@
 #Write server output
 server <- function(input, output, session){
-  ######
-  #Images
-  ######
-
-
   #####
   #buttons
   #####
+  #week forward
   observeEvent(input$Week_forward, {
     updateDateRangeInput(session, 'dates', 
                          start = input$dates[1] + 7 ,
                          end = input$dates[2] + 7)})
-  
+  #week back
   observeEvent(input$Week_back, {
     updateDateRangeInput(session, 'dates', 
                          start = input$dates[1] - 7 ,
                          end = input$dates[2] - 7)})
-  
+  #day forward
   observeEvent(input$Day_forward, {
     updateDateRangeInput(session, 'dates', 
                          start = input$dates[1] + 1 ,
                          end = input$dates[2] + 1)})
-  
+  #day back
   observeEvent(input$Day_back, {
     updateDateRangeInput(session, 'dates', 
                          start = input$dates[1] - 1 ,
@@ -31,6 +27,8 @@ server <- function(input, output, session){
 #####
 # Functions
 #####
+  #Retrieves LDESS type from EXTEND ID
+  #WIP: THIS WILLL BE UPDATED TO USE A EXTERNALLY DEFINED LOOKUP TABLE
   LDESS <- reactive({
     ID <- input$EXTEND_ID
     if(input$EXTEND_ID  %in% "EXT0007"){
@@ -40,6 +38,7 @@ server <- function(input, output, session){
     }
     return(output)
   })
+ #CALCULATES HEAT LOAD
   Heat_load_calculator <- function(op_mode,op_mode_string,flow,heat1,heat2,specific_heat){
     if(any(op_mode %in% op_mode_string) & !(flow == 0)){
       value <- as.numeric(flow) * as.numeric(specific_heat) * abs(as.numeric(heat1) - as.numeric(heat2))
@@ -56,15 +55,6 @@ server <- function(input, output, session){
     db_port <- '5432'  # Specify the port (e.g., 5432)
     db_user <- 'ldess_hist_dashboard'
     db_password <- 'SIE09375SDKJF'
-    #schema_name <- input$EXTEND_ID %>% tolower()
-    #schema_name <- "ext0006" #FOR TESTING
-    #table_name <- "sensor_logs"
-    
-    #query information
-    #enddate <- input$dates[2] %>% as.character()
-    #startdate <- input$dates[1] %>% as.character()
-    #enddate <- as.character(Sys.Date())
-    #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
     
     #connect, define and run query   
     con <- dbConnect(RPostgres::Postgres(),
@@ -88,197 +78,84 @@ server <- function(input, output, session){
   #every time the button is pushed 2 more points are given to the rv value and the refreshes will run again.
   #we are preventing one refresh from taking all of the points by giving each command a unique decimal number it will take the points to
   
-  stored_opp <- reactiveVal()
+  rv <- reactiveVal(2) #reactive value starts at 2 upon innitialization
+  
+  stored_opp <- reactiveVal() #storage for operating table
+  
   Operating_DF_pre <- eventReactive(rv(),{
     if(rv() == 2){
-      # #db information:
-      # db <- 'ldess_db'
-      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
-      # db_port <- '5432'  # Specify the port (e.g., 5432)
-      # db_user <- 'ldess_hist_dashboard'
-      # db_password <- 'SIE09375SDKJF'
-      # schema_name <- input$EXTEND_ID %>% tolower()
-      # #schema_name <- "ext0006" #FOR TESTING
-      # table_name <- "opschedule"
-      # 
-      # #query information
-      # enddate <- input$dates[2] %>% as.character()
-      # startdate <- input$dates[1] %>% as.character()
-      # #enddate <- as.character(Sys.Date())
-      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
-      # 
-      # #connect, define and run query   
-      # con <- dbConnect(RPostgres::Postgres(),
-      #                  dbname = db,
-      #                  host = host_db,
-      #                  port = db_port,
-      #                  user = db_user,
-      #                  password = db_password)
-      # 
-      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
-      # result <- dbGetQuery(con, query)
       
       result <- sql_table_pull(table_name = "opschedule",
                                startdate = input$dates[1] %>% as.character(),
                                enddate = input$dates[2] %>% as.character(),
                                schema_name = input$EXTEND_ID %>% tolower())
-      
-      dbDisconnect(con) #disconnect
-      
-      
-      #name mapping
-      rename_dict <- c("shBatteryDirectMode" ="SHB_Direct",
-                       "spaceHeatingSetpoint" = "SH_Setpoint",
-                       "therminoStartRechargeSoc" = "HWB Recharge SOC",
-                       "extendElements.maxElecInputKw" = "SHB_max_IN_KW",
-                       "extendElements.minElecInputKw" = "SHB_min_IN_KW",
-                       "heatPumpControl.hpSourceBattery" = "HP_Source_Battery",
-                       "heatPumpControl.hpElectricInputKw" = "HP_IN_KW",
-                       "heatPumpControl.hpThermalOutputKw" ="HP_OUT_KW",
-                       "heatPumpControl.hwBatteryPriority" = "HP_HWB_Priority",
-                       "heatPumpControl.shBatteryPriority" = "HP_SHB_Priority",
-                       "heatPumpControl.spaceHeatingPriority" ="HP_SH_Priority",
-                       "therminoElements.maxElecInputKw" = "HWB_Elec_IN_KW_max",
-                       "therminoElements.minElecInputKw" = "HWB_Elec_IN_KW_min",
-                       "DateTime" = "DateTime",
-                       "space_heating_user_schedule" = "space_heating_user_schedule",
-                       "hot_water_user_schedule" = "hot_water_user_schedule",
-                       "consumption_Schedule" = "consumption_Schedule",
-                       "Agreed_Consumption_schedule" = "Agreed_Consumption_schedule",
-                       "TOU_NoVAT" = "TOU_NoVAT",
-                       "TOU_VAT" = "TOU_VAT" ,
-                       "outside_temperature_forecast" = "outside_temperature_forecast"
-                       )
-      
-      # rename
-      names(result) <- rename_dict[names(result)]
-      result$SHB_Direct <- ifelse(result$SHB_Direct == TRUE,1,0) 
-      
-      galvinizenumeric <- c( "HP_HWB_Priority", "HP_SHB_Priority","HP_SH_Priority")
-      
-      for(i in galvinizenumeric){
-        result[,colnames(result) == i] <-  result[,colnames(result) == i] %>% as.numeric()
-      }
-      
-      #jugaad for correcting the heat schedule decimil place
-      result$space_heating_user_schedule <- as.numeric(result$space_heating_user_schedule) /10
       
       stored_opp(result) 
       print("opp query run, rv should now be 1.5")
       rv(1.5)
     }else if(rv() == 1){
-      # #db information:
-      # db <- 'ldess_db'
-      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
-      # db_port <- '5432'  # Specify the port (e.g., 5432)
-      # db_user <- 'ldess_hist_dashboard'
-      # db_password <- 'SIE09375SDKJF'
-      # schema_name <- input$EXTEND_ID %>% tolower()
-      # #schema_name <- "ext0006" #FOR TESTING
-      # table_name <- "opschedule"
-      # 
-      # #query information
-      # enddate <- input$dates[2] %>% as.character()
-      # startdate <- input$dates[1] %>% as.character()
-      # #enddate <- as.character(Sys.Date())
-      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
-      # 
-      # #connect, define and run query   
-      # con <- dbConnect(RPostgres::Postgres(),
-      #                  dbname = db,
-      #                  host = host_db,
-      #                  port = db_port,
-      #                  user = db_user,
-      #                  password = db_password)
-      # 
-      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
-      # result <- dbGetQuery(con, query)
-      # 
-      # dbDisconnect(con) #disconnect
       
       result <- sql_table_pull(table_name = "opschedule",
                                startdate = input$dates[1] %>% as.character(),
                                enddate = input$dates[2] %>% as.character(),
                                schema_name = input$EXTEND_ID %>% tolower())
-      #name mapping
-      rename_dict <- c("shBatteryDirectMode" ="SHB_Direct",
-                       "spaceHeatingSetpoint" = "SH_Setpoint",
-                       "therminoStartRechargeSoc" = "HWB Recharge SOC",
-                       "extendElements.maxElecInputKw" = "SHB_max_IN_KW",
-                       "extendElements.minElecInputKw" = "SHB_min_IN_KW",
-                       "heatPumpControl.hpSourceBattery" = "HP_Source_Battery",
-                       "heatPumpControl.hpElectricInputKw" = "HP_IN_KW",
-                       "heatPumpControl.hpThermalOutputKw" ="HP_OUT_KW",
-                       "heatPumpControl.hwBatteryPriority" = "HP_HWB_Priority",
-                       "heatPumpControl.shBatteryPriority" = "HP_SHB_Priority",
-                       "heatPumpControl.spaceHeatingPriority" ="HP_SH_Priority",
-                       "therminoElements.maxElecInputKw" = "HWB_Elec_IN_KW_max",
-                       "therminoElements.minElecInputKw" = "HWB_Elec_IN_KW_min",
-                       "DateTime" = "DateTime",
-                       "space_heating_user_schedule" = "space_heating_user_schedule",
-                       "hot_water_user_schedule" = "hot_water_user_schedule",
-                       "consumption_Schedule" = "consumption_Schedule",
-                       "Agreed_Consumption_schedule" = "Agreed_Consumption_schedule",
-                       "TOU_NoVAT" = "TOU_NoVAT",
-                       "TOU_VAT" = "TOU_VAT" ,
-                       "outside_temperature_forecast" = "outside_temperature_forecast")
-      
+     
+       print("opp query run, rv should now be 0")
+      rv(0)
+      }
       # rename
+        #name mapping
+        rename_dict <- c("shBatteryDirectMode" ="SHB_Direct",
+                         "spaceHeatingSetpoint" = "SH_Setpoint",
+                         "therminoStartRechargeSoc" = "HWB Recharge SOC",
+                         "extendElements.maxElecInputKw" = "SHB_max_IN_KW",
+                         "extendElements.minElecInputKw" = "SHB_min_IN_KW",
+                         "heatPumpControl.hpSourceBattery" = "HP_Source_Battery",
+                         "heatPumpControl.hpElectricInputKw" = "HP_IN_KW",
+                         "heatPumpControl.hpThermalOutputKw" ="HP_OUT_KW",
+                         "heatPumpControl.hwBatteryPriority" = "HP_HWB_Priority",
+                         "heatPumpControl.shBatteryPriority" = "HP_SHB_Priority",
+                         "heatPumpControl.spaceHeatingPriority" ="HP_SH_Priority",
+                         "therminoElements.maxElecInputKw" = "HWB_Elec_IN_KW_max",
+                         "therminoElements.minElecInputKw" = "HWB_Elec_IN_KW_min",
+                         "DateTime" = "DateTime",
+                         "space_heating_user_schedule" = "space_heating_user_schedule",
+                         "hot_water_user_schedule" = "hot_water_user_schedule",
+                         "consumption_Schedule" = "consumption_Schedule",
+                         "Agreed_Consumption_schedule" = "Agreed_Consumption_schedule",
+                         "TOU_NoVAT" = "TOU_NoVAT",
+                         "TOU_VAT" = "TOU_VAT" ,
+                         "outside_temperature_forecast" = "outside_temperature_forecast"
+        )
       names(result) <- rename_dict[names(result)]
+      
       result$SHB_Direct <- ifelse(result$SHB_Direct == TRUE,1,0) 
       
-      galvinizenumeric <- c( "HP_HWB_Priority", "HP_SHB_Priority","HP_SH_Priority")
+      #force integer columns to be numeric
+      forcenumeric <- c( "HP_HWB_Priority", "HP_SHB_Priority","HP_SH_Priority")
       
-      for(i in galvinizenumeric){
+      for(i in forcenumeric){
         result[,colnames(result) == i] <-  result[,colnames(result) == i] %>% as.numeric()
       }
       
-      #jugaad for correcting the heat schedule decimil place
+      #correcting the heat schedule decimil place
       result$space_heating_user_schedule <- as.numeric(result$space_heating_user_schedule) /10
       
       stored_opp(result) 
-      print("opp query run, rv should now be 0")
-      rv(0)
-    }
+     
+    
     return(stored_opp())
     
   })
   
   
   
-  rv <- reactiveVal(2)
-  stored_data <- reactiveVal()
+
+  stored_data <- reactiveVal() #storage for maintanece log 
   
   Master_DF <- eventReactive(rv(),{
     if(rv() == 2){
-      # #db information:
-      # db <- 'ldess_db'
-      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
-      # db_port <- '5432'  # Specify the port (e.g., 5432)
-      # db_user <- 'ldess_hist_dashboard'
-      # db_password <- 'SIE09375SDKJF'
-      # schema_name <- input$EXTEND_ID %>% tolower()
-      # #schema_name <- "ext0006" #FOR TESTING
-      # table_name <- "sensor_logs"
-      # 
-      # #query information
-      # enddate <- input$dates[2] %>% as.character()
-      # startdate <- input$dates[1] %>% as.character()
-      # #enddate <- as.character(Sys.Date())
-      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
-      # 
-      # #connect, define and run query   
-      # con <- dbConnect(RPostgres::Postgres(),
-      #                  dbname = db,
-      #                  host = host_db,
-      #                  port = db_port,
-      #                  user = db_user,
-      #                  password = db_password)
-      # 
-      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
-      # result <- dbGetQuery(con, query)
-      # 
-      # dbDisconnect(con) #disconnect
+      
       result <- sql_table_pull(table_name = "sensor_logs",
                      startdate = input$dates[1] %>% as.character(),
                      enddate = input$dates[2] %>% as.character(),
@@ -286,36 +163,9 @@ server <- function(input, output, session){
       print("master query has run, rv value shoudl be 1")
       rv(1)
       stored_data(result)
-      #return(result) 
+      
     }else if(rv() == 1.5){
-      #db information:
-      # db <- 'ldess_db'
-      # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
-      # db_port <- '5432'  # Specify the port (e.g., 5432)
-      # db_user <- 'ldess_hist_dashboard'
-      # db_password <- 'SIE09375SDKJF'
-      # schema_name <- input$EXTEND_ID %>% tolower()
-      # #schema_name <- "ext0007" #FOR TESTING
-      # table_name <- "sensor_logs"
-      # 
-      # #query information
-      # enddate <- input$dates[2] %>% as.character()
-      # startdate <- input$dates[1] %>% as.character()
-      # #enddate <- as.character(Sys.Date())
-      # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
-      # 
-      # #connect, define and run query   
-      # con <- dbConnect(RPostgres::Postgres(),
-      #                  dbname = db,
-      #                  host = host_db,
-      #                  port = db_port,
-      #                  user = db_user,
-      #                  password = db_password)
-      # 
-      # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
-      # result <- dbGetQuery(con, query)
-      # 
-      # dbDisconnect(con) #disconnect
+      
       result <- sql_table_pull(table_name = "sensor_logs",
                      startdate = input$dates[1] %>% as.character(),
                      enddate = input$dates[2] %>% as.character(),
@@ -323,47 +173,19 @@ server <- function(input, output, session){
       print("master query has run, rv value shoudl be 0")
       rv(0)
       stored_data(result)
-      #return(result) 
+      
     }
     return(stored_data())
-    # #db information:
-    # db <- 'ldess_db'
-    # host_db <- '172.187.185.55'  # e.g., 'ec2-54-83-201-96.compute-1.amazonaws.com'
-    # db_port <- '5432'  # Specify the port (e.g., 5432)
-    # db_user <- 'ldess_hist_dashboard'
-    # db_password <- 'SIE09375SDKJF'
-    # schema_name <- input$EXTEND_ID %>% tolower()
-    # #schema_name <- "ext0007" #FOR TESTING
-    # table_name <- "sensor_logs"
-    # 
-    # #query information
-    # enddate <- input$dates[2] %>% as.character()
-    # startdate <- input$dates[1] %>% as.character()
-    # #enddate <- as.character(Sys.Date())
-    # #startdate <- as.POSIXct("2024-06-10",tz = 'UTC')
-    # 
-    # #connect, define and run query   
-    # con <- dbConnect(RPostgres::Postgres(),
-    #                  dbname = db,
-    #                  host = host_db,
-    #                  port = db_port,
-    #                  user = db_user,
-    #                  password = db_password)
-    # 
-    # query <- paste0("SELECT * FROM ",schema_name,".",table_name," WHERE \"DateTime\" >= \'",startdate,"\'::date AND \"DateTime\" < \'",enddate,"\'::date ;")
-    # result <- dbGetQuery(con, query)
-    # 
-    # dbDisconnect(con) #disconnect
-    # 
-    # return(result) 
+    
   })
   
+  #add 2 to RV when datapull button is pushed
   observeEvent(input$datapull,{
     rv(2) 
     print("button pushed")
     })
   
-
+  #filter out based on slider filter
   Master_DF_2_pre <- reactive({  
     DF <- Master_DF()
     CyclesMerge <- input$CyclesMerge
@@ -406,6 +228,7 @@ server <- function(input, output, session){
     
     
   })
+  #adjust opearting table based on slider selection
   Operating_DF <- reactive({  
     DF <- Operating_DF_pre()
     CyclesMerge <- input$CyclesMerge
@@ -431,6 +254,8 @@ server <- function(input, output, session){
     
     
   })
+  
+  
   #calculated columns
   Master_DF_2 <- reactive({  
     DF <- Master_DF_2_pre()
@@ -569,15 +394,7 @@ server <- function(input, output, session){
       column_title <- paste0(i,"_return_value")
       DF[[column_title]] <- DF[,colnames(DF) == i] %>% as.numeric() %>% round(digits = 0)
     }
-    # #LEGACY
-    # #clean operating mode
-    # Mode_mapping <- read_excel("register_mapping.xlsx",sheet = "Op_mode")
-    # 
-    # DF$Hex_mode <- as.hexmode(DF$SYS_CURR_OPM)
-    # DF$OP_Mode <- lapply(DF$Hex_mode, function(x) {
-    #   Mode_mapping$State[match(x, Mode_mapping$Reading)]
-    # })
-    # 
+    
     
     #create averages for SHB
     #Create a mean TS reading for Extend battery
@@ -654,7 +471,7 @@ server <- function(input, output, session){
   Master_DF_plots <- reactive({  
     DF <- Master_DF_2()
     #fill empty time index
-    full_datetime_range <- seq.POSIXt(from = min(DF$DateTime), to = max(DF$DateTime), by = "min") #create list of times
+    full_datetime_range <- seq.POSIXt(from = min(DF$DateTime), to = max(DF$DateTime), by = "min",tz = "Europe/London") #create list of times
     #find times where there is data using minutes only
     newtimes <- setdiff(substr(full_datetime_range,1,15), #ALL TIMES BY ten MINUTE
                           substr(DF$DateTime,1,15) #DATA TIMES BY ten MINUTE
@@ -680,7 +497,6 @@ server <- function(input, output, session){
       colreq <- c("DateTime","OP_Mode","State_Explination","ZV",	"MV1",	"MV2", "FS1_FS","FS2_FS")
     }
     temp <- DF[,colnames(DF) %in% colreq]
-   # temp <- DF[,colnames(DF) %in% c("DateTime","OP_Mode","State_Explination","DV1","DV2","DV3" ,"DV4","DV5","DV6","DV7","DV8", "MV1","MV2", "MV3")]
     temp <- temp[order(temp$DateTime,decreasing = TRUE),]
     temp$DateTime <- as.POSIXct(temp$DateTime) %>% as.character()
     return(temp)

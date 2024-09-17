@@ -23,16 +23,10 @@ library(DBI) #connecting to sql database
 #this line alligns your working directory with the file path but can't be used for an application hosted on shinyapps
 #setwd(dirname(rstudioapi::getSourceEditorContext()$path))
 
-####for testing
 ui <- dashboardPage(skin = "black",
   
   dashboardHeader(title=tags$img(src = "Extend.png", width = "200px", height = "auto")
-                  # , #adds the sunamp logo in the top RHS
-                  # tags$li(a(href = 'https://sunamp.com/en-gb/',
-                  #           img(src = 'Sunamp.png',
-                  #               title = "Company Home", height = "30px"),
-                  #           style = "padding-top:10px; padding-bottom:10px;"),
-                  #         class = "dropdown")
+                 
   ),
   dashboardSidebar(width = 300, 
                    
@@ -45,8 +39,7 @@ ui <- dashboardPage(skin = "black",
                       label = "EXTEND_ID:",
                       selected = "EXT0006",
                       choices = c("EXT0006",
-                                  "EXT0007"#,
-                                  #"EXT0008"
+                                  "EXT0007"
                                   )
                       
                     ),
@@ -70,25 +63,14 @@ ui <- dashboardPage(skin = "black",
                                  menuItem(" Space Heating Battery", tabName = "SHB", icon = icon("house-fire")),
                                  menuItem(" Heat Load", tabName = "Heat_Load", icon = icon("gauge")),
                                  menuItem(" Operation Mode", tabName = "OP_MO", icon = icon("table-list")),
-                                # menuItem(" Operating Schedule", tabName = "TOU", icon = icon("money-bill-trend-up")),
                                  id="selectedTab")
                    ),
-                   # sidebarMenu(menuItem(" Hot Water Battery", tabName = "HWB", icon = icon("shower")),
-                   #              menuItem(" Space Heating Battery", tabName = "SHB", icon = icon("house-fire")),
-                   #              menuItem(" Heat Load", tabName = "Heat_Load", icon = icon("gauge")),
-                   #              menuItem(" Schedule", tabName = "TOU", icon = icon("money-bill-trend-up")),
-                   #             menuItem(" Hydronics", tabName = "Hydronics", icon = icon("wrench")),
-                   #              menuItem(" Master Graph", tabName = "Mastergraph", icon = icon("compass-drafting")),
-                   #              menuItem(" Operation Mode", tabName = "OP_MO", icon = icon("table-list")),
-                   #              id="selectedTab"),
                    dateRangeInput("dates",
                                   "Date range",
                                   start = Sys.Date()-days(1),
-                                  end = Sys.Date()#,
-                                  # min = Sys.Date() - 7,  # Minimum date (7 days ago)
-                                  # max = Sys.Date()
+                                  end = Sys.Date()
                                   ),
-                   #BOOKMARK FOR NOW textOutput("DateRange"),
+                   
                    #week toggle
                    fluidRow(
                      column(5,
@@ -115,15 +97,6 @@ ui <- dashboardPage(skin = "black",
                                  max = 1,
                                  value= c(0,1),
                                  step =.01)), 
-                   # fluidRow(
-                   #   column(5,
-                   #          actionButton("Refresh_call", "Refresh", icon = icon("refresh"), width = 120)
-                   #          )
-                   #   ),
-                   
-                   
-                  
-                  
                    fluidRow(
                      column(5,
                             downloadButton("downloadXLS", "Download XLS", icon = icon("download"), width = 120, style = "color: #fff; background-color: #27ae60; border-color: #fff;padding: 5px 14px 5px 14px;margin: 15px 15px 15px 15px; ")
@@ -149,11 +122,7 @@ ui <- dashboardPage(skin = "black",
                   selectInput("metric", "Metrics for 24h plot:", choices = c("HWB_TSB","HWB_TSM","HWB_TST","HWB_SOC_pct"),
                               selected =  c("HWB_TSB","HWB_TSM","HWB_TST","HWB_SOC_pct"),
                               multiple = TRUE),width = 5),
-                # column(
-                #   selectInput("HWB_TSFS", "Metrics for Hydronics plot:", choices = c("HS_TS4","HS_TS5","FS3_FS"),
-                #               selected =  c("HS_TS4","HS_TS5","FS3_FS"),
-                #               multiple = TRUE), 
-                  # width = 5 ),
+                
                 column(
                     selectInput("HWB_PM", "Metrics for Power usage plot:", choices = c("PM3_I","PM3_PW","PM3_PVA","PM3_PWH","PM3_FR","PM3_PF","PM3_V"),
                                 selected =  c("PM3_PVA"),
@@ -163,8 +132,7 @@ ui <- dashboardPage(skin = "black",
               conditionalPanel(condition= "input.metric.length > 0",
               fluidRow(box(withSpinner(plotlyOutput("HWB_top", height = 350)),width = 12))
               ),
-              # fluidRow(box(withSpinner(plotlyOutput("HWB_bottom", height = 350)),width = 12)),
-              # fluidRow(box(withSpinner(plotlyOutput("HWB_bottomid", height = 350)),width = 12)),
+              
               conditionalPanel(condition= "input.HWB_PM.length > 0",
                 fluidRow(box(withSpinner(plotlyOutput("HWB_bottomer", height = 350)),width = 12))               
               )
@@ -220,7 +188,6 @@ ui <- dashboardPage(skin = "black",
       #TOU
       tabItem(tabName = "TOU",
               fluidPage(
-                # fluidRow(box(withSpinner(plotlyOutput("TOU_plot", height = 450)),width = 12)),
                 fluidRow(box(withSpinner(plotlyOutput("OP_Schedule_plot3", height = 450)),width = 12)),
                 fluidRow(box(withSpinner(plotlyOutput("OP_Schedule_plot",height = 450)),width = 12)),
                 fluidRow(box(withSpinner(plotlyOutput("OP_Schedule_plot2",height = 450)),width = 12)),
