@@ -15,7 +15,7 @@ library(shinycssloaders)
 library(openxlsx)
 library(DT)
 library(numbers) #for mod function
-
+library(dotenv) #for .env file
 library(DBI) #connecting to sql database
 
 
